@@ -12,8 +12,8 @@
 <body>
   <dialog id="credentialsDialog">
     <article>
-      <input id="bearerInput" type="text" placeholder="Bearer">
       <input id="urlInput" type="text" placeholder="URL">
+      <input id="bearerInput" type="text" placeholder="Bearer">
       <footer>
         <button onclick="setCredentials()">Confirm</button>
       </footer>
@@ -31,7 +31,7 @@
 
     async function setCredentials() {
       localStorage.url = urlInput.value.trim()
-      localStorage.bearer = bearerInput.value.trim()
+      localStorage.bearer = bearerInput.value.trim().replace(/\/$/, '')
       const currentUrl = new URL(location.href)
       currentUrl.search = ''
       location.replace(currentUrl.toString())
