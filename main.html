@@ -8,113 +8,140 @@
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <script src="./lib.js"></script>
+  <style>
+    main,
+    header {
+      padding: 0 !important;
+      display: none;
+    }
+
+    fieldset label {
+      display: inline;
+      user-select: none;
+      margin-right: var(--pico-spacing);
+    }
+  </style>
 </head>
 
-<body>
-  <dialog id="credentialsDialog">
-    <article>
-      <input id="urlInput" type="text" placeholder="URL">
-      <input id="bearerInput" type="text" placeholder="Bearer">
-      <footer>
-        <button onclick="setCredentials()">Confirm</button>
-      </footer>
-    </article>
-  </dialog>
+<body style="padding: var(--pico-spacing);">
+  <header>
+    <fieldset>
+      <label id="activeName"></label>
+      <label>
+        <input type="radio" name="feature" id="myNotesRadio" onclick="onFeatureSel(event)" />
+        我的筆記
+      </label>
+      <label>
+        <input type="radio" name="feature" id="aiNotesRadio" onclick="onFeatureSel(event)" />
+        AI的筆記
+      </label>
+      <label>
+        <input type="radio" name="feature" id="promptRadio" onclick="onFeatureSel(event)" />
+        對話
+      </label>
+    </fieldset>
+  </header>
 
-  <dialog id="chatNames">
-    <article>
-      <template id="chatNameTemplate">
-        <button name="btn" type="button"></button>
-      </template>
-    </article>
-  </dialog>
+  <main id="credentials" class="container">
+    <input id="urlInput" type="text" placeholder="URL">
+    <input id="bearerInput" type="text" placeholder="Bearer">
+    <button onclick="setCredentials()">Confirm</button>
+  </main>
 
-  <main class="container">
-    <details id="myNotes" style="display:none">
-      <summary role="button" class="outline secondary">我的筆記</summary>
-      <p>
-        <textarea placeholder="" rows="8"></textarea>
-      </p>
-    </details>
+  <main id="chatNames">
+    <template id="chatNameTemplate">
+      <button></button>
+    </template>
+    <button onclick="add()">＋</button>
+  </main>
 
-    <details id="aiNotes" style="display:none">
-      <summary role="button" class="outline secondary">AI的筆記</summary>
-      <p>
-        <textarea placeholder="" rows="8"></textarea>
-      </p>
-    </details>
+  <main id="myNotes">
+    <textarea placeholder="" rows="8"></textarea>
+  </main>
+
+  <main id="aiNotes">
+    <article></article>
   </main>
 
   <script>
-    let activeChat
-    const MY_NOTES_INIT = "扮演聊天輔助員，依據以下資料幫我撰寫3種回應:\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]\n\n"
+    const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]\n\n"
+
+    function sel(selector) {
+      return document.querySelector(selector)
+    }
+
+    function selAll(selector) {
+      return document.querySelectorAll(selector)
+    }
+
+    async function add() {
+      const input = prompt()
+      if (!input) {
+        return
+      }
+      selAll('main').forEach(m => m.style.display = "none")
+      const name = encodeToVariableName(input)
+      const result = await loadFromKv("chatMetas")
+      const chatMetas = JSON.parse(result.value)
+      chatMetas.push({ name, time: new Date().getTime() })
+      await saveToKv("chatMetas", JSON.stringify(chatMetas))
+      await saveToKv(`${name}_myNotes`, MY_NOTES_INIT)
+      await saveToKv(`${name}_aiNotes`, '')
+      localStorage.defaultName = name
+      location.reload()
+    }
 
     async function init() {
       if (!localStorage.url || !localStorage.bearer || location.search === "?reset") {
-        document.getElementById("credentialsDialog").showModal();
+        sel('header').style.display = "none"
+        sel("#credentials").style.display = "block"
         return
       }
 
-      document.getElementById("chatNames").showModal();
+      const result = await loadFromKv("chatMetas")
+      const chatMetas = JSON.parse(result.value)
+      chatMetas.sort((a, b) => b.time - a.time)
 
-      const result = await loadFromKv("chatNames")
-      const chatNames = JSON.parse(result.value)
-      const template = document.getElementById("chatNameTemplate")
-      const container = document.querySelector("#chatNames article")
-      chatNames.forEach(name => {
+      const template = sel("#chatNameTemplate")
+      const container = sel("#chatNames")
+
+      chatMetas.forEach(meta => {
         const clone = template.content.cloneNode(true)
-        clone.querySelector('button').textContent = name
-        clone.querySelector('button').onclick = async () => {
-          const myNotes = document.getElementById("myNotes")
-          myNotes.style.display = "block"
-          let key = `${name}_myNotes`
+        const btn = clone.querySelector('button')
+        btn.textContent = meta.name
+        btn.onclick = async () => {
+          activeName.textContent = `＊${meta.name}＊`
+
+          let key = `${meta.name}_myNotes`
           let result = await loadFromKv(key)
-          const summary = myNotes.querySelector("summary")
-          summary.textContent = `${name} - 我的筆記`
-          const myNotesTextarea = myNotes.querySelector("textarea")
-          if (result.error === 'Key not found') {
-            myNotesTextarea.value = MY_NOTES_INIT
-            await saveToKv(key, MY_NOTES_INIT)
-          } else {
-            myNotesTextarea.value = result.value
-          }
+
+          sel('header').style.display = "block"
+          selAll('main').forEach(m => m.style.display = "none")
+
+          const myNotesTextarea = sel("#myNotes textarea")
+          myNotesTextarea.value = result.value
           if (myNotesTextarea.value === MY_NOTES_INIT) {
-            summary.click()
+            sel('#myNotesRadio').click()
           }
 
-          const aiNotes = document.getElementById("aiNotes")
-          aiNotes.style.display = "block"
-          key = `${name}_aiNotes`
+          key = `${meta.name}_aiNotes`
           result = await loadFromKv(key)
-          if (result.error === 'Key not found') {
-            const initValue = ""
-            aiNotes.querySelector("textarea").value = initValue
-            await saveToKv(key, initValue)
-          } else {
-            aiNotes.querySelector("textarea").value = result.value
-          }
-          aiNotes.querySelector("summary").textContent = `${name} - AI的筆記`
-
-          document.getElementById("chatNames").close()
+          sel("#aiNotes article").textContent = result.value
+        }
+        if (meta.name === localStorage.defaultName) {
+          btn.click()
+          localStorage.removeItem("defaultName")
         }
         container.appendChild(clone)
       })
-
+      sel("#chatNames").style.display = "block"
     }
     init()
 
-    const testStrings = [
-      "user-name",
-      "東京Hotel",
-      "data@2024",
-      "123abc",
-      "class",
-      "こんにちは世界!"
-    ];
-
-    testStrings.forEach(s => {
-      console.log(`${s}  =>  ${encodeToVariableName(s)}`);
-    });
+    function onFeatureSel(event) {
+      selAll('main').forEach(m => m.style.display = "none")
+      sel(`#${event.target.id.replace('Radio', '')}`).style.display = "block"
+    }
 
     async function setCredentials() {
       localStorage.url = urlInput.value.trim()
