@@ -160,7 +160,7 @@
 
       const result = await loadFromKv("chatMetas")
       const chatMetas = JSON.parse(result.value)
-      chatMetas.sort((a, b) => b.time - a.time)
+      chatMetas.sort((a, b) => a.time - b.time)
 
       const template = sel("#chatNameTemplate")
       const container = sel("#chatNames")
