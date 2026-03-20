@@ -4,21 +4,18 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cloudflare Worker KV 最小範例</title>
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 </head>
 
 <body>
-  <dialog id="missingBearer">
+  <dialog id="credentialsDialog">
     <article>
-      <input id="bearerTokenInput" type="text" name="text" placeholder="Text" aria-label="Text">
+      <input id="bearerInput" type="text" placeholder="Bearer">
+      <input id="urlInput" type="text" placeholder="URL">
       <footer>
-        <button
-          class="secondary"
-          onclick="localStorage.removeItem('base');location.reload()">Reset</button>
-        <button onclick="localStorage.base = bearerTokenInput.value.trim();location.reload()">Confirm</button>
+        <button onclick="setCredentials()">Confirm</button>
       </footer>
     </article>
   </dialog>
@@ -28,15 +25,23 @@
   </main>
 
   <script>
-    if (!localStorage.base) {
-      document.getElementById("missingBearer").showModal();
+    if (!localStorage.url || !localStorage.bearer || location.search === "?reset") {
+      document.getElementById("credentialsDialog").showModal();
+    }
+
+    async function setCredentials() {
+      localStorage.url = urlInput.value.trim()
+      localStorage.bearer = bearerInput.value.trim()
+      const currentUrl = new URL(location.href)
+      currentUrl.search = ''
+      location.replace(currentUrl.toString())
     }
 
     async function saveToKv(key, value) {
-      const response = await fetch(`${localStorage.base}/kv`, {
+      const response = await fetch(`${localStorage.url}/kv`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${localStorage.base}`,
+          "Authorization": `Bearer ${localStorage.bearer}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ key, value }),
@@ -45,9 +50,9 @@
     }
 
     async function loadFromKv(key) {
-      const response = await fetch(`${localStorage.base}/kv/${encodeURIComponent(key)}`, {
+      const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
         headers: {
-          "Authorization": `Bearer ${localStorage.base}`,
+          "Authorization": `Bearer ${localStorage.bearer}`,
         },
       });
       return await response.json();
