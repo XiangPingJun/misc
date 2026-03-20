@@ -13,42 +13,44 @@
 <body>
   <dialog id="missingBearer">
     <article>
-      222
+      <input id="bearerTokenInput" type="text" name="text" placeholder="Text" aria-label="Text">
       <footer>
-        <button>Confirm</button>
+        <button
+          class="secondary"
+          onclick="localStorage.removeItem('base');location.reload()">Reset</button>
+        <button onclick="localStorage.base = bearerTokenInput.value.trim();location.reload()">Confirm</button>
       </footer>
     </article>
   </dialog>
+
   <main class="container">
-    1111
+    <button onclick="saveToKv(1,2)">Set</button>
   </main>
 
   <script>
-    if (!localStorage.workerBaseUrl) {
+    if (!localStorage.base) {
       document.getElementById("missingBearer").showModal();
     }
 
     async function saveToKv(key, value) {
-      const response = await fetch(`${localStorage.workerBaseUrl}/kv`, {
+      const response = await fetch(`${localStorage.base}/kv`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${bearerTokenInput.value.trim()}`,
+          "Authorization": `Bearer ${localStorage.base}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ key, value }),
       });
-
       return await response.json();
     }
 
     async function loadFromKv(key) {
-      const response = await fetch(`${localStorage.workerBaseUrl}/kv/${encodeURIComponent(key)}`, {
+      const response = await fetch(`${localStorage.base}/kv/${encodeURIComponent(key)}`, {
         headers: {
-          "Authorization": `Bearer ${bearerTokenInput.value.trim()}`,
+          "Authorization": `Bearer ${localStorage.base}`,
         },
       });
-      const data = await response.json();
-      showResult(data);
+      return await response.json();
     }
   </script>
 </body>

@@ -1,4 +1,4 @@
-const BEARER_TOKEN = "change-me";
+const BEARER_TOKEN_KEY = "BEARER_TOKEN";
 
 function withCors(response) {
   const headers = new Headers(response.headers);
@@ -13,9 +13,15 @@ function withCors(response) {
   });
 }
 
-function isAuthorized(request) {
+async function isAuthorized(request, env) {
   const authHeader = request.headers.get("Authorization") || "";
-  return authHeader === `Bearer ${BEARER_TOKEN}`;
+  const bearerToken = await env.AI_CONSULTER_KV.get(BEARER_TOKEN_KEY);
+
+  if (!bearerToken) {
+    return false;
+  }
+
+  return authHeader === `Bearer ${bearerToken}`;
 }
 
 export default {
@@ -34,7 +40,7 @@ export default {
     }
 
     if (request.method === "GET" && url.pathname.startsWith("/kv/")) {
-      if (!isAuthorized(request)) {
+      if (!(await isAuthorized(request, env))) {
         return withCors(
           Response.json({ error: "Unauthorized" }, { status: 401 }),
         );
@@ -53,7 +59,7 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/kv") {
-      if (!isAuthorized(request)) {
+      if (!(await isAuthorized(request, env))) {
         return withCors(
           Response.json({ error: "Unauthorized" }, { status: 401 }),
         );
