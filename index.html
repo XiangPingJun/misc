@@ -65,7 +65,7 @@
   </main>
 
   <script>
-    const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n\n"
+    const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n"
     const HAIKU_MODEL = "claude-haiku-4-5"
     const promptImages = []
     let aboutMe
@@ -230,7 +230,7 @@
       const myNotesResult = await loadFromKv(myNotesKey)
       const currentAiNotes = sel("#aiNotes article").textContent
       const claudeResult = await callClaudeApi(
-        value, `關於我:${aboutMe}\n\n` + myNotesResult + currentAiNotes, name, 'claude-opus-4-6', promptImages,
+        value, `關於我:${aboutMe}\n\n${myNotesResult}\n\n${currentAiNotes}`, name, 'claude-opus-4-6', promptImages,
       )
       const aiContent = claudeResult.content
 
