@@ -2,7 +2,6 @@ const BEARER_TOKEN_KEY = "BEARER_TOKEN";
 const CLAUDE_API_KEY_KEY = "CLAUDE_API_KEY";
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_API_VERSION = "2023-06-01";
-const DEFAULT_MODEL = "claude-opus-4-6";
 const DEFAULT_MAX_TOKENS = 4096;
 
 function withCors(response) {
@@ -194,6 +193,15 @@ export default {
         );
       }
 
+      if (typeof model !== "string" || !model.trim()) {
+        return withCors(
+          Response.json(
+            { error: "model must be a non-empty string" },
+            { status: 400 },
+          ),
+        );
+      }
+
       const messageContent = buildMessageContent(prompt, images);
 
       if (!messageContent.length) {
@@ -206,7 +214,7 @@ export default {
       }
 
       const payload = {
-        model: typeof model === "string" && model ? model : DEFAULT_MODEL,
+        model,
         max_tokens: Number.isFinite(max_tokens) ? max_tokens : DEFAULT_MAX_TOKENS,
         messages: [
           {
