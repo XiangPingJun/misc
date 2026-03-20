@@ -1,0 +1,7 @@
+name = "ai-consulter"
+main = "worker.js"
+compatibility_date = "2026-03-20"
+
+[[kv_namespaces]]
+binding = "AI_CONSULTER_KV"
+id = "da9b609637f94499bad9c3e10fff6716"

@@ -1,35 +1,152 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-Hant">
 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hello World</title>
+  <title>Cloudflare Worker KV 最小範例</title>
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
 </head>
 
 <body>
-  <dialog open>
+  <main class="container">
     <article>
       <header>
-        <button aria-label="Close" rel="prev"></button>
-        <p>
-          <strong>🗓️ Thank You for Registering!</strong>
-        </p>
+        <h1>最單純的 Cloudflare Worker + KV</h1>
+        <p>用 Worker 當 API，中間只做兩件事：讀值與寫值。</p>
       </header>
-      <p>
-        We're excited to have you join us for our
-        upcoming event. Please arrive at the museum
-        on time to check in and get started.
-      </p>
-      <ul>
-        <li>Date: Saturday, April 15</li>
-        <li>Time: 10:00am - 12:00pm</li>
-      </ul>
+
+      <h2>1. 建立 KV namespace</h2>
+      <pre><code>wrangler kv namespace create AI_CONSULTER_KV</code></pre>
+
+      <h2>2. 把 id 填回 wrangler.toml</h2>
+      <p>把指令輸出的 <strong>id</strong> 與 <strong>preview_id</strong> 填進設定檔。</p>
+
+      <h2>3. 本機啟動</h2>
+      <pre><code>wrangler dev</code></pre>
+
+      <h2>4. 寫入 KV</h2>
+      <pre><code>curl -X POST http://127.0.0.1:8787/kv \
+  -H "Content-Type: application/json" \
+  -d '{"key":"name","value":"yuanhao"}'</code></pre>
+
+      <h2>5. 讀取 KV</h2>
+      <pre><code>curl http://127.0.0.1:8787/kv/name</code></pre>
+
+      <h2>6. 用 JavaScript 透過 Worker 存取 KV</h2>
+      <p>如果這個頁面不是由同一個 Worker 網址提供，請先填入你的 Worker URL。</p>
+
+      <label for="worker-url">Worker URL</label>
+      <input id="worker-url" name="worker-url" placeholder="https://your-worker.your-subdomain.workers.dev">
+
+      <div class="grid">
+        <div>
+          <label for="kv-key">Key</label>
+          <input id="kv-key" name="kv-key" value="name">
+        </div>
+        <div>
+          <label for="kv-value">Value</label>
+          <input id="kv-value" name="kv-value" value="yuanhao">
+        </div>
+      </div>
+
+      <div class="grid">
+        <button id="save-kv" type="button">寫入 KV</button>
+        <button id="load-kv" type="button" class="secondary">讀取 KV</button>
+      </div>
+
+      <label for="result">結果</label>
+      <textarea id="result" readonly>尚未執行</textarea>
+
+      <pre><code>const workerUrl = document.querySelector("#worker-url").value.trim() || window.location.origin;
+const key = document.querySelector("#kv-key").value.trim();
+const value = document.querySelector("#kv-value").value;
+
+async function saveToKv() {
+  const response = await fetch(`${workerUrl}/kv`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, value }),
+  });
+
+  return response.json();
+}
+
+async function loadFromKv() {
+  const response = await fetch(`${workerUrl}/kv/${encodeURIComponent(key)}`);
+  return response.json();
+}</code></pre>
+
+      <p>程式碼在同目錄的 <strong>worker.js</strong>，只有一個 GET 與一個 POST 路由。</p>
     </article>
-  </dialog>
+  </main>
+
+  <script>
+    const workerUrlInput = document.querySelector("#worker-url");
+    const keyInput = document.querySelector("#kv-key");
+    const valueInput = document.querySelector("#kv-value");
+    const resultOutput = document.querySelector("#result");
+    const saveButton = document.querySelector("#save-kv");
+    const loadButton = document.querySelector("#load-kv");
+
+    function getWorkerBaseUrl() {
+      return workerUrlInput.value.trim() || window.location.origin;
+    }
+
+    function showResult(data) {
+      resultOutput.value = JSON.stringify(data, null, 2);
+    }
+
+    async function saveToKv() {
+      const key = keyInput.value.trim();
+      const value = valueInput.value;
+
+      if (!key) {
+        showResult({ error: "key 不能是空的" });
+        return;
+      }
+
+      const response = await fetch(`${getWorkerBaseUrl()}/kv`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, value }),
+      });
+
+      const data = await response.json();
+      showResult(data);
+    }
+
+    async function loadFromKv() {
+      const key = keyInput.value.trim();
+
+      if (!key) {
+        showResult({ error: "key 不能是空的" });
+        return;
+      }
+
+      const response = await fetch(`${getWorkerBaseUrl()}/kv/${encodeURIComponent(key)}`);
+      const data = await response.json();
+      showResult(data);
+    }
+
+    saveButton.addEventListener("click", async () => {
+      try {
+        await saveToKv();
+      } catch (error) {
+        showResult({ error: error.message });
+      }
+    });
+
+    loadButton.addEventListener("click", async () => {
+      try {
+        await loadFromKv();
+      } catch (error) {
+        showResult({ error: error.message });
+      }
+    });
+  </script>
 </body>
 
 </html>
