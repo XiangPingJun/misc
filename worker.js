@@ -1,14 +1,21 @@
+const BEARER_TOKEN = "change-me";
+
 function withCors(response) {
   const headers = new Headers(response.headers);
   headers.set("Access-Control-Allow-Origin", "*");
   headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  headers.set("Access-Control-Allow-Headers", "Content-Type");
+  headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
     headers,
   });
+}
+
+function isAuthorized(request) {
+  const authHeader = request.headers.get("Authorization") || "";
+  return authHeader === `Bearer ${BEARER_TOKEN}`;
 }
 
 export default {
@@ -21,12 +28,18 @@ export default {
         headers: {
           "Access-Control-Allow-Origin": "*",
           "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
         },
       });
     }
 
     if (request.method === "GET" && url.pathname.startsWith("/kv/")) {
+      if (!isAuthorized(request)) {
+        return withCors(
+          Response.json({ error: "Unauthorized" }, { status: 401 }),
+        );
+      }
+
       const key = decodeURIComponent(url.pathname.replace("/kv/", ""));
       const value = await env.AI_CONSULTER_KV.get(key);
 
@@ -40,6 +53,12 @@ export default {
     }
 
     if (request.method === "POST" && url.pathname === "/kv") {
+      if (!isAuthorized(request)) {
+        return withCors(
+          Response.json({ error: "Unauthorized" }, { status: 401 }),
+        );
+      }
+
       const { key, value } = await request.json();
 
       if (!key || value === undefined) {

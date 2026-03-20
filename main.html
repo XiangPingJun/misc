@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-Hant">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cloudflare Worker KV 最小範例</title>
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+</head>
+
+<body>
+  <dialog id="missingBearer">
+    <article>
+      222
+      <footer>
+        <button>Confirm</button>
+      </footer>
+    </article>
+  </dialog>
+  <main class="container">
+    1111
+  </main>
+
+  <script>
+    if (!localStorage.workerBaseUrl) {
+      document.getElementById("missingBearer").showModal();
+    }
+
+    async function saveToKv(key, value) {
+      const response = await fetch(`${localStorage.workerBaseUrl}/kv`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${bearerTokenInput.value.trim()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ key, value }),
+      });
+
+      return await response.json();
+    }
+
+    async function loadFromKv(key) {
+      const response = await fetch(`${localStorage.workerBaseUrl}/kv/${encodeURIComponent(key)}`, {
+        headers: {
+          "Authorization": `Bearer ${bearerTokenInput.value.trim()}`,
+        },
+      });
+      const data = await response.json();
+      showResult(data);
+    }
+  </script>
+</body>
+
+</html>

@@ -29,17 +29,22 @@
 
       <h2>4. 寫入 KV</h2>
       <pre><code>curl -X POST http://127.0.0.1:8787/kv \
+  -H "Authorization: Bearer change-me" \
   -H "Content-Type: application/json" \
   -d '{"key":"name","value":"yuanhao"}'</code></pre>
 
       <h2>5. 讀取 KV</h2>
-      <pre><code>curl http://127.0.0.1:8787/kv/name</code></pre>
+      <pre><code>curl http://127.0.0.1:8787/kv/name \
+      -H "Authorization: Bearer change-me"</code></pre>
 
       <h2>6. 用 JavaScript 透過 Worker 存取 KV</h2>
       <p>如果這個頁面不是由同一個 Worker 網址提供，請先填入你的 Worker URL。</p>
 
       <label for="worker-url">Worker URL</label>
       <input id="worker-url" name="worker-url" placeholder="https://your-worker.your-subdomain.workers.dev">
+
+      <label for="bearer-token">Bearer Token</label>
+      <input id="bearer-token" name="bearer-token" value="change-me">
 
       <div class="grid">
         <div>
@@ -61,13 +66,17 @@
       <textarea id="result" readonly>尚未執行</textarea>
 
       <pre><code>const workerUrl = document.querySelector("#worker-url").value.trim() || window.location.origin;
+const bearerToken = document.querySelector("#bearer-token").value.trim();
 const key = document.querySelector("#kv-key").value.trim();
 const value = document.querySelector("#kv-value").value;
 
 async function saveToKv() {
   const response = await fetch(`${workerUrl}/kv`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Authorization": `Bearer ${bearerToken}`,
+      "Content-Type": "application/json"
+    },
     body: JSON.stringify({ key, value }),
   });
 
@@ -75,7 +84,11 @@ async function saveToKv() {
 }
 
 async function loadFromKv() {
-  const response = await fetch(`${workerUrl}/kv/${encodeURIComponent(key)}`);
+  const response = await fetch(`${workerUrl}/kv/${encodeURIComponent(key)}`, {
+    headers: {
+      "Authorization": `Bearer ${bearerToken}`,
+    },
+  });
   return response.json();
 }</code></pre>
 
@@ -85,6 +98,7 @@ async function loadFromKv() {
 
   <script>
     const workerUrlInput = document.querySelector("#worker-url");
+    const bearerTokenInput = document.querySelector("#bearer-token");
     const keyInput = document.querySelector("#kv-key");
     const valueInput = document.querySelector("#kv-value");
     const resultOutput = document.querySelector("#result");
@@ -110,7 +124,10 @@ async function loadFromKv() {
 
       const response = await fetch(`${getWorkerBaseUrl()}/kv`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Authorization": `Bearer ${bearerTokenInput.value.trim()}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ key, value }),
       });
 
@@ -126,7 +143,11 @@ async function loadFromKv() {
         return;
       }
 
-      const response = await fetch(`${getWorkerBaseUrl()}/kv/${encodeURIComponent(key)}`);
+      const response = await fetch(`${getWorkerBaseUrl()}/kv/${encodeURIComponent(key)}`, {
+        headers: {
+          "Authorization": `Bearer ${bearerTokenInput.value.trim()}`,
+        },
+      });
       const data = await response.json();
       showResult(data);
     }
