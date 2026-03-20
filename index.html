@@ -60,11 +60,13 @@
 
   <main id="prompt">
     <textarea rows="3"></textarea>
+    <div id="promptImages"></div>
     <article style="white-space: pre-line;"></article>
   </main>
 
   <script>
     const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]\n\n"
+    const promptImages = []
 
     function sel(selector) {
       return document.querySelector(selector)
@@ -72,6 +74,64 @@
 
     function selAll(selector) {
       return document.querySelectorAll(selector)
+    }
+
+    function renderPromptImages() {
+      const container = sel("#promptImages")
+      container.innerHTML = ""
+
+      promptImages.forEach((image, index) => {
+        const wrapper = document.createElement("article")
+        wrapper.style.display = "inline-block"
+        wrapper.style.marginRight = "var(--pico-spacing)"
+        wrapper.style.marginBottom = "var(--pico-spacing)"
+
+        const preview = document.createElement("img")
+        preview.src = `data:${image.media_type};base64,${image.data}`
+        preview.alt = `pasted-image-${index + 1}`
+        preview.style.maxWidth = "160px"
+        preview.style.maxHeight = "160px"
+        preview.style.display = "block"
+        preview.style.marginBottom = "0.5rem"
+
+        wrapper.appendChild(preview)
+        container.appendChild(wrapper)
+      })
+    }
+
+    async function fileToBase64(file) {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+
+      const [meta, base64] = dataUrl.split(",")
+      const mediaType = meta.match(/data:(.*);base64/)[1]
+      return { media_type: mediaType, data: base64 }
+    }
+
+    async function onPromptPaste(event) {
+      const items = Array.from(event.clipboardData?.items || [])
+      const imageItems = items.filter(item => item.type.startsWith("image/"))
+
+      if (!imageItems.length) {
+        return
+      }
+
+      event.preventDefault()
+
+      for (const item of imageItems) {
+        const file = item.getAsFile()
+        if (!file) {
+          continue
+        }
+
+        promptImages.push(await fileToBase64(file))
+      }
+
+      renderPromptImages()
     }
 
     async function add() {
@@ -136,6 +196,9 @@
     }
     init()
 
+    sel("#prompt textarea").addEventListener("paste", onPromptPaste)
+    renderPromptImages()
+
     function onFeatureSel(event) {
       selAll("[name=featureRadio]").forEach(btn => btn.classList.add("outline"))
       event.target.classList.remove("outline")
@@ -157,7 +220,7 @@
         textarea.focus()
         btn.onclick = async () => {
           const value = textarea.value.trim()
-          if (!value) {
+          if (!value && !promptImages.length) {
             return
           }
 
@@ -165,7 +228,7 @@
           const myNotesKey = `${name}_myNotes`
           const myNotesResult = await loadFromKv(myNotesKey)
           const currentAiNotes = sel("#aiNotes article").textContent
-          const claudeResult = await callClaudeApi(value, myNotesResult.value + currentAiNotes, name)
+          const claudeResult = await callClaudeApi(value, myNotesResult.value + currentAiNotes, name, undefined, promptImages)
           const aiContent = claudeResult.content
 
           sel("#prompt article").textContent = aiContent
@@ -191,6 +254,8 @@
           sel("#aiNotes article").textContent = mergedAiNotes
           await saveToKv(`${name}_aiNotes`, mergedAiNotes)
 
+          promptImages.length = 0
+          renderPromptImages()
           textarea.value = ''
         }
       }
@@ -229,7 +294,7 @@
       return await response.json();
     }
 
-    async function callClaudeApi(prompt, system, chatName, model) {
+    async function callClaudeApi(prompt, system, chatName, model, images) {
       NProgress.start()
       const response = await fetch(`${localStorage.url}/claude`, {
         method: "POST",
@@ -237,7 +302,7 @@
           "Authorization": `Bearer ${localStorage.bearer}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt, system, chat_name: chatName, model }),
+        body: JSON.stringify({ prompt, system, chat_name: chatName, model, images }),
       })
       NProgress.done()
       return await response.json()

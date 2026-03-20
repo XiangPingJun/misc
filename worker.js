@@ -40,6 +40,36 @@ function extractClaudeText(content) {
     .join("\n");
 }
 
+function buildMessageContent(prompt, images) {
+  const content = [];
+
+  if (typeof prompt === "string" && prompt) {
+    content.push({
+      type: "text",
+      text: prompt,
+    });
+  }
+
+  if (Array.isArray(images)) {
+    for (const image of images) {
+      if (!image || typeof image.data !== "string" || typeof image.media_type !== "string") {
+        continue;
+      }
+
+      content.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: image.media_type,
+          data: image.data,
+        },
+      });
+    }
+  }
+
+  return content;
+}
+
 async function callClaude(env, payload) {
   const apiKey = await env.AI_CONSULTER_KV.get(CLAUDE_API_KEY_KEY);
 
@@ -153,12 +183,23 @@ export default {
         );
       }
 
-      const { prompt, system, chat_name, model, max_tokens } = await request.json();
+      const { prompt, system, chat_name, model, max_tokens, images } = await request.json();
 
-      if (!prompt || typeof prompt !== "string") {
+      if (prompt !== undefined && typeof prompt !== "string") {
         return withCors(
           Response.json(
-            { error: "Request body must include prompt" },
+            { error: "prompt must be a string when provided" },
+            { status: 400 },
+          ),
+        );
+      }
+
+      const messageContent = buildMessageContent(prompt, images);
+
+      if (!messageContent.length) {
+        return withCors(
+          Response.json(
+            { error: "Request body must include prompt or images" },
             { status: 400 },
           ),
         );
@@ -170,7 +211,7 @@ export default {
         messages: [
           {
             role: "user",
-            content: prompt,
+            content: messageContent,
           },
         ],
       };
