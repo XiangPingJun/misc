@@ -91,7 +91,7 @@
       chatDate.setHours(0, 0, 0, 0)
 
       const dayDiff = Math.round((today.getTime() - chatDate.getTime()) / 86400000)
-      return `${meta.name}-${dayDiff}`
+      return dayDiff > 4 ? `${meta.name}-${dayDiff}` : meta.name
     }
 
     function renderPromptImages() {
