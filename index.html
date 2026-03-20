@@ -4,169 +4,244 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cloudflare Worker KV 最小範例</title>
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/nprogress@0.2.0/nprogress.css">
+  <script src="https://cdn.jsdelivr.net/npm/nprogress@0.2.0/nprogress.min.js"></script>
+  <script src="./lib.js"></script>
+  <style>
+    main,
+    header {
+      padding: 0 !important;
+      display: none;
+    }
+
+    fieldset label {
+      display: inline;
+      user-select: none;
+      margin-right: var(--pico-spacing);
+    }
+  </style>
 </head>
 
-<body>
-  <main class="container">
-    <article>
-      <header>
-        <h1>最單純的 Cloudflare Worker + KV</h1>
-        <p>用 Worker 當 API，中間只做兩件事：讀值與寫值。</p>
-      </header>
+<body style="padding: var(--pico-spacing);">
+  <header>
+    <div role="group">
+      <button>↑<span id="activeName"></span></button>
+      <button name="featureRadio" id="myNotesRadio" onclick="onFeatureSel(event)">✏️</button>
+      <button name="featureRadio" id="aiNotesRadio" onclick="onFeatureSel(event)">🤖</button>
+      <button name="featureRadio" id="promptRadio" onclick="onFeatureSel(event)">💬</button>
+    </div>
+  </header>
 
-      <h2>1. 建立 KV namespace</h2>
-      <pre><code>wrangler kv namespace create AI_CONSULTER_KV</code></pre>
+  <main id="credentials" class="container">
+    <input id="urlInput" type="text" placeholder="URL">
+    <input id="bearerInput" type="text" placeholder="Bearer">
+    <button onclick="setCredentials()">Confirm</button>
+  </main>
 
-      <h2>2. 把 id 填回 wrangler.toml</h2>
-      <p>把指令輸出的 <strong>id</strong> 與 <strong>preview_id</strong> 填進設定檔。</p>
+  <main id="chatNames">
+    <template id="chatNameTemplate">
+      <button></button>
+    </template>
+    <button onclick="add()">＋</button>
+  </main>
 
-      <h2>3. 本機啟動</h2>
-      <pre><code>wrangler dev</code></pre>
+  <main id="myNotes">
+    <textarea rows="12"></textarea>
+  </main>
 
-      <h2>4. 寫入 KV</h2>
-      <pre><code>curl -X POST http://127.0.0.1:8787/kv \
-  -H "Authorization: Bearer change-me" \
-  -H "Content-Type: application/json" \
-  -d '{"key":"name","value":"yuanhao"}'</code></pre>
+  <main id="aiNotes">
+    <article></article>
+  </main>
 
-      <h2>5. 讀取 KV</h2>
-      <pre><code>curl http://127.0.0.1:8787/kv/name \
-      -H "Authorization: Bearer change-me"</code></pre>
-
-      <h2>6. 用 JavaScript 透過 Worker 存取 KV</h2>
-      <p>如果這個頁面不是由同一個 Worker 網址提供，請先填入你的 Worker URL。</p>
-
-      <label for="worker-url">Worker URL</label>
-      <input id="worker-url" name="worker-url" placeholder="https://your-worker.your-subdomain.workers.dev">
-
-      <label for="bearer-token">Bearer Token</label>
-      <input id="bearer-token" name="bearer-token" value="change-me">
-
-      <div class="grid">
-        <div>
-          <label for="kv-key">Key</label>
-          <input id="kv-key" name="kv-key" value="name">
-        </div>
-        <div>
-          <label for="kv-value">Value</label>
-          <input id="kv-value" name="kv-value" value="yuanhao">
-        </div>
-      </div>
-
-      <div class="grid">
-        <button id="save-kv" type="button">寫入 KV</button>
-        <button id="load-kv" type="button" class="secondary">讀取 KV</button>
-      </div>
-
-      <label for="result">結果</label>
-      <textarea id="result" readonly>尚未執行</textarea>
-
-      <pre><code>const workerUrl = document.querySelector("#worker-url").value.trim() || window.location.origin;
-const bearerToken = document.querySelector("#bearer-token").value.trim();
-const key = document.querySelector("#kv-key").value.trim();
-const value = document.querySelector("#kv-value").value;
-
-async function saveToKv() {
-  const response = await fetch(`${workerUrl}/kv`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${bearerToken}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ key, value }),
-  });
-
-  return response.json();
-}
-
-async function loadFromKv() {
-  const response = await fetch(`${workerUrl}/kv/${encodeURIComponent(key)}`, {
-    headers: {
-      "Authorization": `Bearer ${bearerToken}`,
-    },
-  });
-  return response.json();
-}</code></pre>
-
-      <p>程式碼在同目錄的 <strong>worker.js</strong>，只有一個 GET 與一個 POST 路由。</p>
-    </article>
+  <main id="prompt">
+    <textarea rows="3"></textarea>
+    <article style="white-space: pre-line;"></article>
   </main>
 
   <script>
-    const workerUrlInput = document.querySelector("#worker-url");
-    const bearerTokenInput = document.querySelector("#bearer-token");
-    const keyInput = document.querySelector("#kv-key");
-    const valueInput = document.querySelector("#kv-value");
-    const resultOutput = document.querySelector("#result");
-    const saveButton = document.querySelector("#save-kv");
-    const loadButton = document.querySelector("#load-kv");
+    const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]\n\n"
 
-    function getWorkerBaseUrl() {
-      return workerUrlInput.value.trim() || window.location.origin;
+    function sel(selector) {
+      return document.querySelector(selector)
     }
 
-    function showResult(data) {
-      resultOutput.value = JSON.stringify(data, null, 2);
+    function selAll(selector) {
+      return document.querySelectorAll(selector)
     }
 
-    async function saveToKv() {
-      const key = keyInput.value.trim();
-      const value = valueInput.value;
+    async function add() {
+      const input = prompt()
+      if (!input) {
+        return
+      }
+      selAll('main').forEach(m => m.style.display = "none")
+      const name = encodeToVariableName(input)
+      const result = await loadFromKv("chatMetas")
+      const chatMetas = JSON.parse(result.value)
+      chatMetas.push({ name, time: new Date().getTime() })
+      await saveToKv("chatMetas", JSON.stringify(chatMetas))
+      await saveToKv(`${name}_myNotes`, MY_NOTES_INIT)
+      await saveToKv(`${name}_aiNotes`, '')
+      localStorage.defaultName = name
+      location.reload()
+    }
 
-      if (!key) {
-        showResult({ error: "key 不能是空的" });
-        return;
+    async function init() {
+      if (!localStorage.url || !localStorage.bearer || location.search === "?reset") {
+        sel('header').style.display = "none"
+        sel("#credentials").style.display = "block"
+        return
       }
 
-      const response = await fetch(`${getWorkerBaseUrl()}/kv`, {
+      const result = await loadFromKv("chatMetas")
+      const chatMetas = JSON.parse(result.value)
+      chatMetas.sort((a, b) => b.time - a.time)
+
+      const template = sel("#chatNameTemplate")
+      const container = sel("#chatNames")
+
+      chatMetas.forEach(meta => {
+        const clone = template.content.cloneNode(true)
+        const btn = clone.querySelector('button')
+        btn.textContent = meta.name
+        btn.onclick = async () => {
+          activeName.textContent = meta.name
+
+          let key = `${meta.name}_myNotes`
+          let result = await loadFromKv(key)
+
+          sel('header').style.display = "block"
+          selAll('main').forEach(m => m.style.display = "none")
+
+          const myNotesTextarea = sel("#myNotes textarea")
+          myNotesTextarea.value = result.value
+          sel(myNotesTextarea.value === MY_NOTES_INIT ? '#myNotesRadio' : '#promptRadio').click()
+
+          key = `${meta.name}_aiNotes`
+          result = await loadFromKv(key)
+          sel("#aiNotes article").textContent = result.value
+        }
+        if (meta.name === localStorage.defaultName) {
+          btn.click()
+          localStorage.removeItem("defaultName")
+        }
+        container.appendChild(clone)
+      })
+      sel("#chatNames").style.display = "block"
+    }
+    init()
+
+    function onFeatureSel(event) {
+      selAll("[name=featureRadio]").forEach(btn => btn.classList.add("outline"))
+      event.target.classList.remove("outline")
+      const id = event.target.id.replace('Radio', '')
+      selAll('main').forEach(m => m.style.display = "none")
+      sel(`#${id}`).style.display = "block"
+
+      const btn = sel("header button")
+      btn.disabled = false
+      if (id === "myNotes") {
+        sel("#myNotes textarea").focus()
+        btn.onclick = () => {
+          saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
+        }
+      } else if (id === "aiNotes") {
+        btn.disabled = true
+      } else if (id === "prompt") {
+        const textarea = sel("#prompt textarea")
+        textarea.focus()
+        btn.onclick = async () => {
+          const value = textarea.value.trim()
+          if (!value) {
+            return
+          }
+
+          const name = activeName.textContent
+          const myNotesKey = `${name}_myNotes`
+          const myNotesResult = await loadFromKv(myNotesKey)
+          const currentAiNotes = sel("#aiNotes article").textContent
+          const claudeResult = await callClaudeApi(value, myNotesResult.value + currentAiNotes, name)
+          const aiContent = claudeResult.content
+
+          sel("#prompt article").textContent = aiContent
+
+          const mergeResult = await callClaudeApi(
+            [
+              `請用繁體中文統整 chatName「${name}」的重點。`,
+              '請把「新回應」與「既有歷史重點」合併成一份精簡、可持續更新的摘要。',
+              '請去除重複，保留人物特徵、互動脈絡、重要事件、偏好與注意事項。',
+              '',
+              '既有歷史重點：',
+              currentAiNotes || '目前沒有既有摘要。',
+              '',
+              '新回應：',
+              aiContent,
+            ].join('\n'),
+            myNotesResult.value || '',
+            name,
+            'claude-sonnet-4-6',
+          )
+
+          const mergedAiNotes = mergeResult.content || currentAiNotes || aiContent
+          sel("#aiNotes article").textContent = mergedAiNotes
+          await saveToKv(`${name}_aiNotes`, mergedAiNotes)
+
+          textarea.value = ''
+        }
+      }
+    }
+
+    async function setCredentials() {
+      localStorage.url = urlInput.value.trim()
+      localStorage.bearer = bearerInput.value.trim().replace(/\/$/, '')
+      const currentUrl = new URL(location.href)
+      currentUrl.search = ''
+      location.replace(currentUrl.toString())
+    }
+
+    async function saveToKv(key, value) {
+      NProgress.start()
+      const response = await fetch(`${localStorage.url}/kv`, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${bearerTokenInput.value.trim()}`,
+          "Authorization": `Bearer ${localStorage.bearer}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ key, value }),
       });
-
-      const data = await response.json();
-      showResult(data);
+      NProgress.done()
+      return await response.json();
     }
 
-    async function loadFromKv() {
-      const key = keyInput.value.trim();
-
-      if (!key) {
-        showResult({ error: "key 不能是空的" });
-        return;
-      }
-
-      const response = await fetch(`${getWorkerBaseUrl()}/kv/${encodeURIComponent(key)}`, {
+    async function loadFromKv(key) {
+      NProgress.start()
+      const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
         headers: {
-          "Authorization": `Bearer ${bearerTokenInput.value.trim()}`,
+          "Authorization": `Bearer ${localStorage.bearer}`,
         },
       });
-      const data = await response.json();
-      showResult(data);
+      NProgress.done()
+      return await response.json();
     }
 
-    saveButton.addEventListener("click", async () => {
-      try {
-        await saveToKv();
-      } catch (error) {
-        showResult({ error: error.message });
-      }
-    });
-
-    loadButton.addEventListener("click", async () => {
-      try {
-        await loadFromKv();
-      } catch (error) {
-        showResult({ error: error.message });
-      }
-    });
+    async function callClaudeApi(prompt, system, chatName, model) {
+      NProgress.start()
+      const response = await fetch(`${localStorage.url}/claude`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${localStorage.bearer}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt, system, chat_name: chatName, model }),
+      })
+      NProgress.done()
+      return await response.json()
+    }
   </script>
 </body>
 

@@ -1,4 +1,9 @@
 const BEARER_TOKEN_KEY = "BEARER_TOKEN";
+const CLAUDE_API_KEY_KEY = "CLAUDE_API_KEY";
+const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
+const CLAUDE_API_VERSION = "2023-06-01";
+const DEFAULT_MODEL = "claude-opus-4-6";
+const DEFAULT_MAX_TOKENS = 4096;
 
 function withCors(response) {
   const headers = new Headers(response.headers);
@@ -22,6 +27,67 @@ async function isAuthorized(request, env) {
   }
 
   return authHeader === `Bearer ${bearerToken}`;
+}
+
+function extractClaudeText(content) {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content
+    .filter((block) => block?.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
+}
+
+async function callClaude(env, payload) {
+  const apiKey = await env.AI_CONSULTER_KV.get(CLAUDE_API_KEY_KEY);
+
+  if (!apiKey) {
+    return withCors(
+      Response.json(
+        { error: "Claude API key not found", key: CLAUDE_API_KEY_KEY },
+        { status: 500 },
+      ),
+    );
+  }
+
+  const response = await fetch(CLAUDE_API_URL, {
+    method: "POST",
+    headers: {
+      "anthropic-version": CLAUDE_API_VERSION,
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    return withCors(
+      Response.json(
+        {
+          error: "Claude API request failed",
+          status: response.status,
+          details: data,
+        },
+        { status: response.status },
+      ),
+    );
+  }
+
+  return withCors(
+    Response.json({
+      id: data.id,
+      model: data.model,
+      role: data.role,
+      stop_reason: data.stop_reason,
+      usage: data.usage,
+      content: extractClaudeText(data.content),
+      raw: data,
+    }),
+  );
 }
 
 export default {
@@ -80,12 +146,65 @@ export default {
       return withCors(Response.json({ ok: true, key, value: String(value) }));
     }
 
+    if (request.method === "POST" && url.pathname === "/claude") {
+      if (!(await isAuthorized(request, env))) {
+        return withCors(
+          Response.json({ error: "Unauthorized" }, { status: 401 }),
+        );
+      }
+
+      const { prompt, system, chat_name, model, max_tokens } = await request.json();
+
+      if (!prompt || typeof prompt !== "string") {
+        return withCors(
+          Response.json(
+            { error: "Request body must include prompt" },
+            { status: 400 },
+          ),
+        );
+      }
+
+      const payload = {
+        model: typeof model === "string" && model ? model : DEFAULT_MODEL,
+        max_tokens: Number.isFinite(max_tokens) ? max_tokens : DEFAULT_MAX_TOKENS,
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      };
+
+      if ((typeof system === "string" && system) || (typeof chat_name === "string" && chat_name)) {
+        const systemParts = [];
+
+        if (typeof chat_name === "string" && chat_name) {
+          systemParts.push(`chat_name: ${chat_name}`);
+        }
+
+        if (typeof system === "string" && system) {
+          systemParts.push(system);
+        }
+
+        payload.system = [
+          {
+            type: "text",
+            text: systemParts.join("\n\n"),
+            cache_control: { type: "ephemeral" },
+          },
+        ];
+      }
+
+      return callClaude(env, payload);
+    }
+
     return withCors(
       Response.json({
         message: "Cloudflare Worker KV demo",
         routes: {
           read: "GET /kv/:key",
           write: "POST /kv",
+          claude: "POST /claude",
         },
       }),
     );
