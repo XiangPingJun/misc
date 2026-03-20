@@ -55,7 +55,7 @@
   </main>
 
   <main id="aiNotes">
-    <article></article>
+    <article style="white-space: pre-line;"></article>
   </main>
 
   <main id="prompt">
@@ -214,7 +214,7 @@
 
       const mergeResult = await callClaudeApi(
         [
-          `請用繁體中文統整 chatName「${name}」的重點。`,
+          `請用繁體中文統整「${name}」的重點。`,
           '請把「新回應」與「既有歷史重點」合併成一份精簡、可持續更新的摘要。',
           '請去除重複，保留人物特徵、互動脈絡、重要事件、偏好與注意事項。',
           '',
