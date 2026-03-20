@@ -65,7 +65,7 @@
   </main>
 
   <script>
-    const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]\n\n"
+    const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n\n"
     const HAIKU_MODEL = "claude-haiku-4-5"
     const promptImages = []
     let aboutMe
@@ -76,6 +76,22 @@
 
     function selAll(selector) {
       return document.querySelectorAll(selector)
+    }
+
+    function formatChatName(meta) {
+      const timestamp = Number(meta.time)
+      if (!Number.isFinite(timestamp)) {
+        return meta.name
+      }
+
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      const chatDate = new Date(timestamp)
+      chatDate.setHours(0, 0, 0, 0)
+
+      const dayDiff = Math.round((today.getTime() - chatDate.getTime()) / 86400000)
+      return `${meta.name}-${dayDiff}`
     }
 
     function renderPromptImages() {
@@ -152,6 +168,13 @@
       location.reload()
     }
 
+    async function refreshChatMetaTime(name) {
+      const chatMetas = JSON.parse(await loadFromKv("chatMetas"))
+      const meta = chatMetas.find(item => item.name === name)
+      meta.time = new Date().getTime()
+      await saveToKv("chatMetas", JSON.stringify(chatMetas))
+    }
+
     async function init() {
       if (!localStorage.url || !localStorage.bearer || location.search === "?reset") {
         sel('header').style.display = "none"
@@ -165,7 +188,8 @@
       chatMetas.sort((a, b) => a.time - b.time).forEach(meta => {
         const clone = sel("#chatNameTemplate").content.cloneNode(true)
         const btn = clone.querySelector('button')
-        btn.textContent = meta.name
+        btn.dataset.chatName = meta.name
+        btn.textContent = formatChatName(meta)
         btn.onclick = async () => {
           activeName.textContent = meta.name
 
@@ -236,6 +260,7 @@
       promptImages.length = 0
       renderPromptImages()
       textarea.value = ''
+      await refreshChatMetaTime(name)
     }
 
     function onFeatureSel(event) {
