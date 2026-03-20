@@ -7,6 +7,10 @@
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/nprogress@0.2.0/nprogress.css">
+  <script src="https://cdn.jsdelivr.net/npm/nprogress@0.2.0/nprogress.min.js"></script>
   <script src="./lib.js"></script>
   <style>
     main,
@@ -26,7 +30,7 @@
 <body style="padding: var(--pico-spacing);">
   <header>
     <fieldset>
-      <label id="activeName"></label>
+      <label>＊<span id="activeName"></span>＊</label>
       <label>
         <input type="radio" name="feature" id="myNotesRadio" onclick="onFeatureSel(event)" />
         我的筆記
@@ -56,6 +60,7 @@
   </main>
 
   <main id="myNotes">
+    <button onclick="updateMyNotes()">上傳</button>
     <textarea placeholder="" rows="8"></textarea>
   </main>
 
@@ -110,7 +115,7 @@
         const btn = clone.querySelector('button')
         btn.textContent = meta.name
         btn.onclick = async () => {
-          activeName.textContent = `＊${meta.name}＊`
+          activeName.textContent = meta.name
 
           let key = `${meta.name}_myNotes`
           let result = await loadFromKv(key)
@@ -120,9 +125,7 @@
 
           const myNotesTextarea = sel("#myNotes textarea")
           myNotesTextarea.value = result.value
-          if (myNotesTextarea.value === MY_NOTES_INIT) {
-            sel('#myNotesRadio').click()
-          }
+          sel(myNotesTextarea.value === MY_NOTES_INIT ? '#myNotesRadio' : '#promptRadio').click()
 
           key = `${meta.name}_aiNotes`
           result = await loadFromKv(key)
@@ -151,7 +154,12 @@
       location.replace(currentUrl.toString())
     }
 
+    async function updateMyNotes() {
+      await saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
+    }
+
     async function saveToKv(key, value) {
+      NProgress.start()
       const response = await fetch(`${localStorage.url}/kv`, {
         method: "POST",
         headers: {
@@ -160,15 +168,18 @@
         },
         body: JSON.stringify({ key, value }),
       });
+      NProgress.done()
       return await response.json();
     }
 
     async function loadFromKv(key) {
+      NProgress.start()
       const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
         headers: {
           "Authorization": `Bearer ${localStorage.bearer}`,
         },
       });
+      NProgress.done()
       return await response.json();
     }
   </script>
