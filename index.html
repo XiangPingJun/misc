@@ -30,7 +30,7 @@
 <body style="padding: var(--pico-spacing);">
   <header>
     <div role="group">
-      <button>↑<span id="activeName"></span></button>
+      <button onclick="sendPrompt()">↑<span id="activeName"></span></button>
       <button name="featureRadio" id="myNotesRadio" onclick="onFeatureSel(event)">✏️</button>
       <button name="featureRadio" id="aiNotesRadio" onclick="onFeatureSel(event)">🤖</button>
       <button name="featureRadio" id="promptRadio" onclick="onFeatureSel(event)">💬</button>
@@ -59,7 +59,7 @@
   </main>
 
   <main id="prompt">
-    <textarea rows="3"></textarea>
+    <textarea rows="4"></textarea>
     <div id="promptImages"></div>
     <article style="white-space: pre-line;"></article>
   </main>
@@ -68,6 +68,7 @@
     const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]\n\n"
     const HAIKU_MODEL = "claude-haiku-4-5"
     const promptImages = []
+    let aboutMe
 
     function sel(selector) {
       return document.querySelector(selector)
@@ -142,8 +143,7 @@
       }
       selAll('main').forEach(m => m.style.display = "none")
       const name = encodeToVariableName(input)
-      const result = await loadFromKv("chatMetas")
-      const chatMetas = JSON.parse(result.value)
+      const chatMetas = JSON.parse(await loadFromKv("chatMetas"))
       chatMetas.push({ name, time: new Date().getTime() })
       await saveToKv("chatMetas", JSON.stringify(chatMetas))
       await saveToKv(`${name}_myNotes`, MY_NOTES_INIT)
@@ -159,39 +159,33 @@
         return
       }
 
-      const result = await loadFromKv("chatMetas")
-      const chatMetas = JSON.parse(result.value)
-      chatMetas.sort((a, b) => a.time - b.time)
+      aboutMe = await loadFromKv("ABOUT_ME")
+      const chatMetas = JSON.parse(await loadFromKv("chatMetas"))
 
-      const template = sel("#chatNameTemplate")
-      const container = sel("#chatNames")
-
-      chatMetas.forEach(meta => {
-        const clone = template.content.cloneNode(true)
+      chatMetas.sort((a, b) => a.time - b.time).forEach(meta => {
+        const clone = sel("#chatNameTemplate").content.cloneNode(true)
         const btn = clone.querySelector('button')
         btn.textContent = meta.name
         btn.onclick = async () => {
           activeName.textContent = meta.name
 
           let key = `${meta.name}_myNotes`
-          let result = await loadFromKv(key)
 
           sel('header').style.display = "block"
           selAll('main').forEach(m => m.style.display = "none")
 
           const myNotesTextarea = sel("#myNotes textarea")
-          myNotesTextarea.value = result.value
+          myNotesTextarea.value = await loadFromKv(key)
           sel(myNotesTextarea.value === MY_NOTES_INIT ? '#myNotesRadio' : '#promptRadio').click()
 
           key = `${meta.name}_aiNotes`
-          result = await loadFromKv(key)
-          sel("#aiNotes article").textContent = result.value
+          sel("#aiNotes article").textContent = await loadFromKv(key)
         }
         if (meta.name === localStorage.defaultName) {
           btn.click()
           localStorage.removeItem("defaultName")
         }
-        container.appendChild(clone)
+        sel("#chatNames").appendChild(clone)
       })
       sel("#chatNames").style.display = "block"
     }
@@ -199,6 +193,50 @@
 
     sel("#prompt textarea").addEventListener("paste", onPromptPaste)
     renderPromptImages()
+
+    async function sendPrompt() {
+      const textarea = sel("#prompt textarea")
+      const value = textarea.value.trim()
+      if (!value && !promptImages.length) {
+        return
+      }
+
+      const name = activeName.textContent
+      const myNotesKey = `${name}_myNotes`
+      const myNotesResult = await loadFromKv(myNotesKey)
+      const currentAiNotes = sel("#aiNotes article").textContent
+      const claudeResult = await callClaudeApi(
+        value, `關於我:${aboutMe}\n\n` + myNotesResult + currentAiNotes, name, 'claude-opus-4-6', promptImages,
+      )
+      const aiContent = claudeResult.content
+
+      sel("#prompt article").textContent = aiContent
+
+      const mergeResult = await callClaudeApi(
+        [
+          `請用繁體中文統整 chatName「${name}」的重點。`,
+          '請把「新回應」與「既有歷史重點」合併成一份精簡、可持續更新的摘要。',
+          '請去除重複，保留人物特徵、互動脈絡、重要事件、偏好與注意事項。',
+          '',
+          '既有歷史重點：',
+          currentAiNotes || '目前沒有既有摘要。',
+          '',
+          '新回應：',
+          aiContent,
+        ].join('\n'),
+        myNotesResult,
+        name,
+        HAIKU_MODEL,
+      )
+
+      const mergedAiNotes = mergeResult.content || currentAiNotes || aiContent
+      sel("#aiNotes article").textContent = mergedAiNotes
+      await saveToKv(`${name}_aiNotes`, mergedAiNotes)
+
+      promptImages.length = 0
+      renderPromptImages()
+      textarea.value = ''
+    }
 
     function onFeatureSel(event) {
       selAll("[name=featureRadio]").forEach(btn => btn.classList.add("outline"))
@@ -208,59 +246,16 @@
       sel(`#${id}`).style.display = "block"
 
       const btn = sel("header button")
-      btn.disabled = false
+      btn.disabled = true
       if (id === "myNotes") {
         sel("#myNotes textarea").focus()
-        btn.onclick = () => {
-          saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
-        }
-      } else if (id === "aiNotes") {
-        btn.disabled = true
-      } else if (id === "prompt") {
+      } else {
+        saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
+      }
+      if (id === "prompt") {
+        btn.disabled = false
         const textarea = sel("#prompt textarea")
         textarea.focus()
-        btn.onclick = async () => {
-          const value = textarea.value.trim()
-          if (!value && !promptImages.length) {
-            return
-          }
-
-          const name = activeName.textContent
-          const myNotesKey = `${name}_myNotes`
-          const myNotesResult = await loadFromKv(myNotesKey)
-          const currentAiNotes = sel("#aiNotes article").textContent
-          const claudeResult = await callClaudeApi(
-            value, myNotesResult.value + currentAiNotes, name, 'claude-opus-4-6', promptImages,
-          )
-          const aiContent = claudeResult.content
-
-          sel("#prompt article").textContent = aiContent
-
-          const mergeResult = await callClaudeApi(
-            [
-              `請用繁體中文統整 chatName「${name}」的重點。`,
-              '請把「新回應」與「既有歷史重點」合併成一份精簡、可持續更新的摘要。',
-              '請去除重複，保留人物特徵、互動脈絡、重要事件、偏好與注意事項。',
-              '',
-              '既有歷史重點：',
-              currentAiNotes || '目前沒有既有摘要。',
-              '',
-              '新回應：',
-              aiContent,
-            ].join('\n'),
-            myNotesResult.value || '',
-            name,
-            HAIKU_MODEL,
-          )
-
-          const mergedAiNotes = mergeResult.content || currentAiNotes || aiContent
-          sel("#aiNotes article").textContent = mergedAiNotes
-          await saveToKv(`${name}_aiNotes`, mergedAiNotes)
-
-          promptImages.length = 0
-          renderPromptImages()
-          textarea.value = ''
-        }
       }
     }
 
@@ -294,7 +289,7 @@
         },
       });
       NProgress.done()
-      return await response.json();
+      return (await response.json()).value;
     }
 
     async function callClaudeApi(prompt, system, chatName, model, images) {
