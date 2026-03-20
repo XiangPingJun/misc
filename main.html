@@ -29,21 +29,12 @@
 
 <body style="padding: var(--pico-spacing);">
   <header>
-    <fieldset>
-      <label>＊<span id="activeName"></span>＊</label>
-      <label>
-        <input type="radio" name="feature" id="myNotesRadio" onclick="onFeatureSel(event)" />
-        我的筆記
-      </label>
-      <label>
-        <input type="radio" name="feature" id="aiNotesRadio" onclick="onFeatureSel(event)" />
-        AI的筆記
-      </label>
-      <label>
-        <input type="radio" name="feature" id="promptRadio" onclick="onFeatureSel(event)" />
-        對話
-      </label>
-    </fieldset>
+    <div role="group">
+      <button>↑<span id="activeName"></span></button>
+      <button name="featureRadio" id="myNotesRadio" onclick="onFeatureSel(event)">✏️</button>
+      <button name="featureRadio" id="aiNotesRadio" onclick="onFeatureSel(event)">🤖</button>
+      <button name="featureRadio" id="promptRadio" onclick="onFeatureSel(event)">💬</button>
+    </div>
   </header>
 
   <main id="credentials" class="container">
@@ -60,11 +51,15 @@
   </main>
 
   <main id="myNotes">
-    <button onclick="updateMyNotes()">上傳</button>
-    <textarea placeholder="" rows="8"></textarea>
+    <textarea rows="12"></textarea>
   </main>
 
   <main id="aiNotes">
+    <article></article>
+  </main>
+
+  <main id="prompt">
+    <textarea rows="3"></textarea>
     <article></article>
   </main>
 
@@ -142,8 +137,30 @@
     init()
 
     function onFeatureSel(event) {
+      selAll("[name=featureRadio]").forEach(btn => btn.classList.add("outline"))
+      event.target.classList.remove("outline")
+      const id = event.target.id.replace('Radio', '')
       selAll('main').forEach(m => m.style.display = "none")
-      sel(`#${event.target.id.replace('Radio', '')}`).style.display = "block"
+      sel(`#${id}`).style.display = "block"
+
+      const btn = sel("header button")
+      btn.disabled = false
+      if (id === "myNotes") {
+        sel("#myNotes textarea").focus()
+        btn.onclick = () => {
+          saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
+        }
+      } else if (id === "aiNotes") {
+        btn.disabled = true
+      } else if (id === "prompt") {
+        const textarea = sel("#prompt textarea")
+        textarea.focus()
+        btn.onclick = () => {
+          const value = textarea.value.trim()
+          textarea.value = ''
+
+        }
+      }
     }
 
     async function setCredentials() {
@@ -152,10 +169,6 @@
       const currentUrl = new URL(location.href)
       currentUrl.search = ''
       location.replace(currentUrl.toString())
-    }
-
-    async function updateMyNotes() {
-      await saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
     }
 
     async function saveToKv(key, value) {
