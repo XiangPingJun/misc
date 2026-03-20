@@ -7,6 +7,7 @@
   <link
     rel="stylesheet"
     href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <script src="./lib.js"></script>
 </head>
 
 <body>
@@ -21,13 +22,75 @@
   </dialog>
 
   <main class="container">
-    <button onclick="saveToKv(1,2)">Set</button>
+    <details id="chatNames" open>
+      <summary role="button" class="outline">-- 選擇交談 --</summary>
+      <p>
+        <template id="chatNameTemplate">
+          <button name="btn" type="button"></button>
+        </template>
+      </p>
+    </details>
+
+    <details id="myNotes">
+      <summary role="button" class="outline secondary">我的筆記</summary>
+      <p>
+        <textarea
+          placeholder=""
+          rows="8">
+        </textarea>
+      </p>
+    </details>
+
+    <details id="aiNotes">
+      <summary role="button" class="outline secondary">AI的筆記</summary>
+      <p>
+        <textarea
+          placeholder=""
+          rows="8">
+        </textarea>
+      </p>
+    </details>
   </main>
 
   <script>
-    if (!localStorage.url || !localStorage.bearer || location.search === "?reset") {
-      document.getElementById("credentialsDialog").showModal();
+    let activeChat
+
+    async function init() {
+      if (!localStorage.url || !localStorage.bearer || location.search === "?reset") {
+        document.getElementById("credentialsDialog").showModal();
+        return
+      }
+
+      loadFromKv("chatNames").then(result => {
+        const chatNames = JSON.parse(result.value)
+        const template = document.getElementById("chatNameTemplate")
+        const container = document.querySelector("#chatNames p")
+        chatNames.forEach(name => {
+          const clone = template.content.cloneNode(true)
+          clone.querySelector('button').textContent = name
+          clone.querySelector('button').onclick = () => {
+            const summary = document.querySelector("#chatNames summary")
+            summary.textContent = `交談：${name}`
+            summary.click()
+          }
+          container.appendChild(clone)
+        })
+      })
     }
+    init()
+
+    const testStrings = [
+      "user-name",
+      "東京Hotel",
+      "data@2024",
+      "123abc",
+      "class",
+      "こんにちは世界!"
+    ];
+
+    testStrings.forEach(s => {
+      console.log(`${s}  =>  ${encodeToVariableName(s)}`);
+    });
 
     async function setCredentials() {
       localStorage.url = urlInput.value.trim()
