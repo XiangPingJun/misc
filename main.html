@@ -47,6 +47,7 @@
 
   <script>
     let activeChat
+    const MY_NOTES_INIT = "扮演聊天輔助員，依據以下資料幫我撰寫3種回應:\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]\n\n"
 
     async function init() {
       if (!localStorage.url || !localStorage.bearer || location.search === "?reset") {
@@ -68,14 +69,18 @@
           myNotes.style.display = "block"
           let key = `${name}_myNotes`
           let result = await loadFromKv(key)
+          const summary = myNotes.querySelector("summary")
+          summary.textContent = `${name} - 我的筆記`
+          const myNotesTextarea = myNotes.querySelector("textarea")
           if (result.error === 'Key not found') {
-            const initValue = "扮演聊天輔助員，依據以下資料幫我撰寫3種回應:\n[最近的話題]\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]"
-            myNotes.querySelector("textarea").value = initValue
-            await saveToKv(key, initValue)
+            myNotesTextarea.value = MY_NOTES_INIT
+            await saveToKv(key, MY_NOTES_INIT)
           } else {
-            myNotes.querySelector("textarea").value = result.value
+            myNotesTextarea.value = result.value
           }
-          myNotes.querySelector("summary").textContent = `${name} - 我的筆記`
+          if (myNotesTextarea.value === MY_NOTES_INIT) {
+            summary.click()
+          }
 
           const aiNotes = document.getElementById("aiNotes")
           aiNotes.style.display = "block"
