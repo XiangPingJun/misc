@@ -21,33 +21,26 @@
     </article>
   </dialog>
 
-  <main class="container">
-    <details id="chatNames" open>
-      <summary role="button" class="outline">-- 選擇交談 --</summary>
-      <p>
-        <template id="chatNameTemplate">
-          <button name="btn" type="button"></button>
-        </template>
-      </p>
-    </details>
+  <dialog id="chatNames">
+    <article>
+      <template id="chatNameTemplate">
+        <button name="btn" type="button"></button>
+      </template>
+    </article>
+  </dialog>
 
-    <details id="myNotes">
+  <main class="container">
+    <details id="myNotes" style="display:none">
       <summary role="button" class="outline secondary">我的筆記</summary>
       <p>
-        <textarea
-          placeholder=""
-          rows="8">
-        </textarea>
+        <textarea placeholder="" rows="8"></textarea>
       </p>
     </details>
 
-    <details id="aiNotes">
+    <details id="aiNotes" style="display:none">
       <summary role="button" class="outline secondary">AI的筆記</summary>
       <p>
-        <textarea
-          placeholder=""
-          rows="8">
-        </textarea>
+        <textarea placeholder="" rows="8"></textarea>
       </p>
     </details>
   </main>
@@ -61,21 +54,47 @@
         return
       }
 
-      loadFromKv("chatNames").then(result => {
-        const chatNames = JSON.parse(result.value)
-        const template = document.getElementById("chatNameTemplate")
-        const container = document.querySelector("#chatNames p")
-        chatNames.forEach(name => {
-          const clone = template.content.cloneNode(true)
-          clone.querySelector('button').textContent = name
-          clone.querySelector('button').onclick = () => {
-            const summary = document.querySelector("#chatNames summary")
-            summary.textContent = `交談：${name}`
-            summary.click()
+      document.getElementById("chatNames").showModal();
+
+      const result = await loadFromKv("chatNames")
+      const chatNames = JSON.parse(result.value)
+      const template = document.getElementById("chatNameTemplate")
+      const container = document.querySelector("#chatNames article")
+      chatNames.forEach(name => {
+        const clone = template.content.cloneNode(true)
+        clone.querySelector('button').textContent = name
+        clone.querySelector('button').onclick = async () => {
+          const myNotes = document.getElementById("myNotes")
+          myNotes.style.display = "block"
+          let key = `${name}_myNotes`
+          let result = await loadFromKv(key)
+          if (result.error === 'Key not found') {
+            const initValue = "扮演聊天輔助員，依據以下資料幫我撰寫3種回應:\n[最近的話題]\n[他是怎樣的人?]\n\n[怎麼認識他的?]\n\n[他以前喜歡什麼?]"
+            myNotes.querySelector("textarea").value = initValue
+            await saveToKv(key, initValue)
+          } else {
+            myNotes.querySelector("textarea").value = result.value
           }
-          container.appendChild(clone)
-        })
+          myNotes.querySelector("summary").textContent = `${name} - 我的筆記`
+
+          const aiNotes = document.getElementById("aiNotes")
+          aiNotes.style.display = "block"
+          key = `${name}_aiNotes`
+          result = await loadFromKv(key)
+          if (result.error === 'Key not found') {
+            const initValue = ""
+            aiNotes.querySelector("textarea").value = initValue
+            await saveToKv(key, initValue)
+          } else {
+            aiNotes.querySelector("textarea").value = result.value
+          }
+          aiNotes.querySelector("summary").textContent = `${name} - AI的筆記`
+
+          document.getElementById("chatNames").close()
+        }
+        container.appendChild(clone)
       })
+
     }
     init()
 
