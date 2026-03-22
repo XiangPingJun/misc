@@ -66,9 +66,22 @@
 
   <script>
     const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n"
+    const MODELS = {
+      chat: 'claude-opus-4-6',
+      summary: 'claude-haiku-4-5',
+    }
+    const CHAT_FIELDS = {
+      myNotes: 'myNotes',
+      messages: 'messages',
+      messagesRevision: 'messagesRevision',
+      summary: 'summary',
+      summaryRevision: 'summaryRevision',
+    }
     const promptImages = []
-    let aboutMe
-    let chatMessages = []
+    const state = {
+      aboutMe: '',
+      chatMessages: [],
+    }
 
     function sel(selector) {
       return document.querySelector(selector)
@@ -76,6 +89,41 @@
 
     function selAll(selector) {
       return document.querySelectorAll(selector)
+    }
+
+    function activeChatName() {
+      return sel('#activeName').textContent.trim()
+    }
+
+    function chatKey(name, field) {
+      return `${name}_${field}`
+    }
+
+    function parseJson(value, fallback) {
+      if (!value) {
+        return fallback
+      }
+
+      try {
+        return JSON.parse(value)
+      } catch {
+        return fallback
+      }
+    }
+
+    function hideAllMains() {
+      selAll('main').forEach(main => {
+        main.style.display = 'none'
+      })
+    }
+
+    function showMain(id) {
+      hideAllMains()
+      sel(`#${id}`).style.display = 'block'
+    }
+
+    function setHeaderVisible(visible) {
+      sel('header').style.display = visible ? 'block' : 'none'
     }
 
     function formatChatName(meta) {
@@ -95,26 +143,35 @@
     }
 
     function renderPromptImages() {
-      const container = sel("#promptImages")
-      container.innerHTML = ""
+      const container = sel('#promptImages')
+      container.innerHTML = ''
 
       promptImages.forEach((image, index) => {
-        const wrapper = document.createElement("article")
-        wrapper.style.display = "inline-block"
-        wrapper.style.marginRight = "var(--pico-spacing)"
-        wrapper.style.marginBottom = "var(--pico-spacing)"
+        const wrapper = document.createElement('article')
+        wrapper.style.display = 'inline-block'
+        wrapper.style.marginRight = 'var(--pico-spacing)'
+        wrapper.style.marginBottom = 'var(--pico-spacing)'
 
-        const preview = document.createElement("img")
+        const preview = document.createElement('img')
         preview.src = `data:${image.media_type};base64,${image.data}`
         preview.alt = `pasted-image-${index + 1}`
-        preview.style.maxWidth = "160px"
-        preview.style.maxHeight = "160px"
-        preview.style.display = "block"
-        preview.style.marginBottom = "0.5rem"
+        preview.style.maxWidth = '160px'
+        preview.style.maxHeight = '160px'
+        preview.style.display = 'block'
+        preview.style.marginBottom = '0.5rem'
 
         wrapper.appendChild(preview)
         container.appendChild(wrapper)
       })
+    }
+
+    function renderLatestExchange(messages) {
+      const latest = messages.slice(-2).map(message => {
+        const text = extractMessageText(message)
+        return text ? `${message.role}: ${text}` : ''
+      }).filter(Boolean)
+
+      sel('#prompt article').textContent = latest.join('\n')
     }
 
     async function fileToBase64(file) {
@@ -125,14 +182,14 @@
         reader.readAsDataURL(file)
       })
 
-      const [meta, base64] = dataUrl.split(",")
+      const [meta, base64] = dataUrl.split(',')
       const mediaType = meta.match(/data:(.*);base64/)[1]
       return { media_type: mediaType, data: base64 }
     }
 
     async function onPromptPaste(event) {
       const items = Array.from(event.clipboardData?.items || [])
-      const imageItems = items.filter(item => item.type.startsWith("image/"))
+      const imageItems = items.filter(item => item.type.startsWith('image/'))
 
       if (!imageItems.length) {
         return
@@ -152,51 +209,68 @@
       renderPromptImages()
     }
 
+    async function loadChatMetas() {
+      return parseJson(await loadFromKv('chatMetas'), [])
+    }
+
+    async function saveChatMetas(chatMetas) {
+      await saveToKv('chatMetas', JSON.stringify(chatMetas))
+    }
+
     async function add() {
       const input = prompt()
       if (!input) {
         return
       }
-      selAll('main').forEach(m => m.style.display = "none")
+
       const name = encodeToVariableName(input)
-      const chatMetas = JSON.parse(await loadFromKv("chatMetas"))
-      chatMetas.push({ name, time: new Date().getTime() })
-      await saveToKv("chatMetas", JSON.stringify(chatMetas))
-      await saveToKv(`${name}_myNotes`, MY_NOTES_INIT)
-      await saveToKv(`${name}_messages`, '[]')
-      await saveToKv(`${name}_messagesRevision`, '0')
-      await saveToKv(`${name}_summary`, '')
-      await saveToKv(`${name}_summaryRevision`, '-1')
+      const chatMetas = await loadChatMetas()
+      chatMetas.push({ name, time: Date.now() })
+
+      hideAllMains()
+      await saveChatMetas(chatMetas)
+      await Promise.all([
+        saveToKv(chatKey(name, CHAT_FIELDS.myNotes), MY_NOTES_INIT),
+        saveToKv(chatKey(name, CHAT_FIELDS.messages), '[]'),
+        saveToKv(chatKey(name, CHAT_FIELDS.messagesRevision), '0'),
+        saveToKv(chatKey(name, CHAT_FIELDS.summary), ''),
+        saveToKv(chatKey(name, CHAT_FIELDS.summaryRevision), '-1'),
+      ])
+
       localStorage.defaultName = name
       location.reload()
     }
 
     async function loadChatMessages(name) {
-      const stored = await loadFromKv(`${name}_messages`)
-      return stored ? normalizeMessages(JSON.parse(stored)) : []
+      return normalizeMessages(parseJson(await loadFromKv(chatKey(name, CHAT_FIELDS.messages)), []))
     }
 
     async function saveChatMessages(name, messages) {
-      await saveToKv(`${name}_messages`, JSON.stringify(normalizeMessages(messages)))
+      await saveToKv(chatKey(name, CHAT_FIELDS.messages), JSON.stringify(normalizeMessages(messages)))
+    }
+
+    async function loadNumberFromKv(key, fallback) {
+      const value = Number(await loadFromKv(key))
+      return Number.isFinite(value) ? value : fallback
     }
 
     async function loadChatRevision(name) {
-      const revision = Number(await loadFromKv(`${name}_messagesRevision`))
-      return Number.isFinite(revision) ? revision : 0
+      return loadNumberFromKv(chatKey(name, CHAT_FIELDS.messagesRevision), 0)
     }
 
     async function saveChatRevision(name, revision) {
-      await saveToKv(`${name}_messagesRevision`, String(revision))
+      await saveToKv(chatKey(name, CHAT_FIELDS.messagesRevision), String(revision))
     }
 
     async function loadSummaryRevision(name) {
-      const revision = Number(await loadFromKv(`${name}_summaryRevision`))
-      return Number.isFinite(revision) ? revision : -1
+      return loadNumberFromKv(chatKey(name, CHAT_FIELDS.summaryRevision), -1)
     }
 
     async function saveSummary(name, summary, revision) {
-      await saveToKv(`${name}_summary`, summary)
-      await saveToKv(`${name}_summaryRevision`, String(revision))
+      await Promise.all([
+        saveToKv(chatKey(name, CHAT_FIELDS.summary), summary),
+        saveToKv(chatKey(name, CHAT_FIELDS.summaryRevision), String(revision)),
+      ])
     }
 
     function buildUserMessage(prompt, images) {
@@ -229,6 +303,17 @@
       return {
         role: 'user',
         content,
+      }
+    }
+
+    function buildAssistantMessage(claudeResult) {
+      const content = Array.isArray(claudeResult.raw?.content)
+        ? claudeResult.raw.content.map(block => normalizeMessageBlock(block, 'assistant')).filter(Boolean)
+        : []
+
+      return {
+        role: 'assistant',
+        content: content.length ? content : [{ type: 'text', text: claudeResult.content || '' }],
       }
     }
 
@@ -273,26 +358,24 @@
         return []
       }
 
-      return messages
-        .map(message => {
-          if (!message || (message.role !== 'user' && message.role !== 'assistant')) {
-            return null
-          }
+      return messages.map(message => {
+        if (!message || (message.role !== 'user' && message.role !== 'assistant')) {
+          return null
+        }
 
-          const content = Array.isArray(message.content)
-            ? message.content.map(block => normalizeMessageBlock(block, message.role)).filter(Boolean)
-            : []
+        const content = Array.isArray(message.content)
+          ? message.content.map(block => normalizeMessageBlock(block, message.role)).filter(Boolean)
+          : []
 
-          if (!content.length) {
-            return null
-          }
+        if (!content.length) {
+          return null
+        }
 
-          return {
-            role: message.role,
-            content,
-          }
-        })
-        .filter(Boolean)
+        return {
+          role: message.role,
+          content,
+        }
+      }).filter(Boolean)
     }
 
     function extractMessageText(message) {
@@ -307,21 +390,14 @@
     }
 
     function formatChatMessagesForSummary(messages) {
-      return messages
-        .map(message => {
-          const text = extractMessageText(message)
-          if (!text) {
-            return ''
-          }
-
-          return `${message.role}:\n${text}`
-        })
-        .filter(Boolean)
-        .join('\n\n')
+      return messages.map(message => {
+        const text = extractMessageText(message)
+        return text ? `${message.role}:\n${text}` : ''
+      }).filter(Boolean).join('\n\n')
     }
 
     async function summarizeChatMessages(name, revision) {
-      if (!chatMessages.length) {
+      if (!state.chatMessages.length) {
         sel('#aiNotes article').textContent = ''
         await saveSummary(name, '', revision)
         return
@@ -331,9 +407,9 @@
         prompt: [
           '請用繁體中文精簡整理以下對話重點。去除重複，輸出精簡條列摘要。',
           '',
-          formatChatMessagesForSummary(chatMessages),
+          formatChatMessagesForSummary(state.chatMessages),
         ].join('\n'),
-        model: 'claude-haiku-4-5',
+        model: MODELS.summary,
       })
 
       const summary = summaryResult.content || ''
@@ -345,10 +421,10 @@
       const [messageRevision, summaryRevision, storedSummary] = await Promise.all([
         loadChatRevision(name),
         loadSummaryRevision(name),
-        loadFromKv(`${name}_summary`),
+        loadFromKv(chatKey(name, CHAT_FIELDS.summary)),
       ])
 
-      if (summaryRevision === messageRevision && (storedSummary || !chatMessages.length)) {
+      if (summaryRevision === messageRevision && (storedSummary || !state.chatMessages.length)) {
         sel('#aiNotes article').textContent = storedSummary || ''
         return
       }
@@ -357,123 +433,151 @@
     }
 
     async function refreshChatMetaTime(name) {
-      const chatMetas = JSON.parse(await loadFromKv("chatMetas"))
+      const chatMetas = await loadChatMetas()
       const meta = chatMetas.find(item => item.name === name)
-      meta.time = new Date().getTime()
-      await saveToKv("chatMetas", JSON.stringify(chatMetas))
+      if (!meta) {
+        return
+      }
+
+      meta.time = Date.now()
+      await saveChatMetas(chatMetas)
+    }
+
+    async function loadActiveChat(name) {
+      const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
+      state.chatMessages = await loadChatMessages(name)
+
+      activeName.textContent = name
+      setHeaderVisible(true)
+
+      const myNotesTextarea = sel('#myNotes textarea')
+      myNotesTextarea.value = myNotes
+      renderLatestExchange(state.chatMessages)
+
+      activateFeature(myNotes === MY_NOTES_INIT ? 'myNotes' : 'prompt', false)
+    }
+
+    function createChatButton(meta) {
+      const clone = sel('#chatNameTemplate').content.cloneNode(true)
+      const btn = clone.querySelector('button')
+
+      btn.dataset.chatName = meta.name
+      btn.textContent = formatChatName(meta)
+      btn.onclick = async () => {
+        await loadActiveChat(meta.name)
+      }
+
+      if (meta.name === localStorage.defaultName) {
+        btn.click()
+        localStorage.removeItem('defaultName')
+      }
+
+      return clone
     }
 
     async function init() {
-      if (!localStorage.url || !localStorage.bearer || location.search === "?reset") {
-        sel('header').style.display = "none"
-        sel("#credentials").style.display = "block"
+      if (!localStorage.url || !localStorage.bearer || location.search === '?reset') {
+        setHeaderVisible(false)
+        showMain('credentials')
         return
       }
 
-      aboutMe = await loadFromKv("ABOUT_ME")
-      const chatMetas = JSON.parse(await loadFromKv("chatMetas"))
+      state.aboutMe = await loadFromKv('ABOUT_ME')
+      const chatMetas = await loadChatMetas()
+      const container = sel('#chatNames')
 
       chatMetas.sort((a, b) => a.time - b.time).forEach(meta => {
-        const clone = sel("#chatNameTemplate").content.cloneNode(true)
-        const btn = clone.querySelector('button')
-        btn.dataset.chatName = meta.name
-        btn.textContent = formatChatName(meta)
-        btn.onclick = async () => {
-          activeName.textContent = meta.name
-
-          let key = `${meta.name}_myNotes`
-
-          sel('header').style.display = "block"
-          selAll('main').forEach(m => m.style.display = "none")
-
-          const myNotesTextarea = sel("#myNotes textarea")
-          myNotesTextarea.value = await loadFromKv(key)
-          sel(myNotesTextarea.value === MY_NOTES_INIT ? '#myNotesRadio' : '#promptRadio').click()
-
-          chatMessages = await loadChatMessages(meta.name)
-          sel("#prompt article").textContent = [
-            `user: ${chatMessages[chatMessages.length - 2]?.content?.[0]?.text ?? ''}`,
-            `assistant: ${chatMessages[chatMessages.length - 1]?.content?.[0]?.text ?? ''}`,
-          ].join('\n').trim()
-        }
-        if (meta.name === localStorage.defaultName) {
-          btn.click()
-          localStorage.removeItem("defaultName")
-        }
-        sel("#chatNames").appendChild(clone)
+        container.appendChild(createChatButton(meta))
       })
-      sel("#chatNames").style.display = "block"
-    }
-    init()
 
-    sel("#prompt textarea").addEventListener("paste", onPromptPaste)
-    renderPromptImages()
+      showMain('chatNames')
+    }
+
+    function clearPromptInput() {
+      promptImages.length = 0
+      renderPromptImages()
+      sel('#prompt textarea').value = ''
+    }
 
     async function sendPrompt() {
-      const textarea = sel("#prompt textarea")
-      const value = textarea.value.trim()
-      if (!value && !promptImages.length) {
+      const textarea = sel('#prompt textarea')
+      const prompt = textarea.value.trim()
+      if (!prompt && !promptImages.length) {
         return
       }
 
-      const name = activeName.textContent
-      const myNotesKey = `${name}_myNotes`
-      const myNotesResult = await loadFromKv(myNotesKey)
+      const name = activeChatName()
+      const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
       const nextMessages = [
-        ...chatMessages,
-        buildUserMessage(value, promptImages),
+        ...state.chatMessages,
+        buildUserMessage(prompt, promptImages),
       ]
 
       const claudeResult = await callClaudeApi({
         messages: nextMessages,
-        system: `About me:${aboutMe}\n\n${myNotesResult}`,
+        system: `About me:${state.aboutMe}\n\n${myNotes}`,
         chatName: name,
-        model: 'claude-opus-4-6',
+        model: MODELS.chat,
       })
-      const aiContent = claudeResult.content
+
       const updatedMessages = [
         ...nextMessages,
-        {
-          role: 'assistant',
-          content: Array.isArray(claudeResult.raw?.content)
-            ? claudeResult.raw.content.map(block => normalizeMessageBlock(block, 'assistant')).filter(Boolean)
-            : [{ type: 'text', text: aiContent }],
-        },
+        buildAssistantMessage(claudeResult),
       ]
 
-      sel("#prompt article").textContent = aiContent
+      sel('#prompt article').textContent = claudeResult.content
       await saveChatMessages(name, updatedMessages)
-      chatMessages = updatedMessages
-      const nextRevision = await loadChatRevision(name) + 1
-      await saveChatRevision(name, nextRevision)
+      state.chatMessages = updatedMessages
+      await saveChatRevision(name, (await loadChatRevision(name)) + 1)
 
-      promptImages.length = 0
-      renderPromptImages()
-      textarea.value = ''
+      clearPromptInput()
       await refreshChatMetaTime(name)
     }
 
-    function onFeatureSel(event) {
-      selAll("[name=featureRadio]").forEach(btn => btn.classList.add("outline"))
-      event.target.classList.remove("outline")
-      const id = event.target.id.replace('Radio', '')
-      selAll('main').forEach(m => m.style.display = "none")
-      sel(`#${id}`).style.display = "block"
+    function persistCurrentMyNotes() {
+      const name = activeChatName()
+      if (!name) {
+        return
+      }
 
-      const btn = sel("header button")
-      btn.disabled = true
-      if (id === "myNotes") {
-        sel("#myNotes textarea").focus()
-      } else {
-        saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
+      saveToKv(chatKey(name, CHAT_FIELDS.myNotes), sel('#myNotes textarea').value)
+    }
+
+    function setSelectedFeature(id) {
+      selAll('[name=featureRadio]').forEach(btn => btn.classList.add('outline'))
+      const button = sel(`#${id}Radio`)
+      if (button) {
+        button.classList.remove('outline')
       }
+    }
+
+    function activateFeature(id, persistMyNotes = true) {
+      setSelectedFeature(id)
+      showMain(id)
+
+      const headerButton = sel('header button')
+      headerButton.disabled = true
+
+      if (id === 'myNotes') {
+        sel('#myNotes textarea').focus()
+        return
+      }
+
+      if (persistMyNotes) {
+        persistCurrentMyNotes()
+      }
+
       if (id === 'aiNotes') {
-        ensureChatSummary(activeName.textContent)
-      } else if (id === "prompt") {
-        btn.disabled = false
-        const textarea = sel("#prompt textarea")
-        textarea.focus()
+        ensureChatSummary(activeChatName())
+        return
       }
+
+      headerButton.disabled = false
+      sel('#prompt textarea').focus()
+    }
+
+    function onFeatureSel(event) {
+      activateFeature(event.target.id.replace('Radio', ''))
     }
 
     async function setCredentials() {
@@ -487,45 +591,51 @@
     async function saveToKv(key, value) {
       NProgress.start()
       const response = await fetch(`${localStorage.url}/kv`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Authorization": `Bearer ${localStorage.bearer}`,
-          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.bearer}`,
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ key, value }),
-      });
+      })
       NProgress.done()
-      return await response.json();
+      return await response.json()
     }
 
     async function loadFromKv(key) {
       NProgress.start()
       const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
         headers: {
-          "Authorization": `Bearer ${localStorage.bearer}`,
+          Authorization: `Bearer ${localStorage.bearer}`,
         },
-      });
+      })
       NProgress.done()
+
       if (response.status === 404) {
         await saveToKv(key, '')
         return ''
       }
-      return (await response.json()).value;
+
+      return (await response.json()).value
     }
 
     async function callClaudeApi({ messages, prompt, system, chatName, model, images }) {
       NProgress.start()
       const response = await fetch(`${localStorage.url}/claude`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Authorization": `Bearer ${localStorage.bearer}`,
-          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.bearer}`,
+          'Content-Type': 'application/json',
         },
         body: JSON.stringify({ messages, prompt, system, chat_name: chatName, model, images }),
       })
       NProgress.done()
       return await response.json()
     }
+
+    sel('#prompt textarea').addEventListener('paste', onPromptPaste)
+    renderPromptImages()
+    init()
   </script>
 </body>
 
