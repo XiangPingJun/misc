@@ -66,9 +66,9 @@
 
   <script>
     const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n"
-    const HAIKU_MODEL = "claude-haiku-4-5"
     const promptImages = []
     let aboutMe
+    let chatMessages = []
 
     function sel(selector) {
       return document.querySelector(selector)
@@ -163,9 +163,132 @@
       chatMetas.push({ name, time: new Date().getTime() })
       await saveToKv("chatMetas", JSON.stringify(chatMetas))
       await saveToKv(`${name}_myNotes`, MY_NOTES_INIT)
-      await saveToKv(`${name}_aiNotes`, '')
+      await saveToKv(`${name}_messages`, '[]')
       localStorage.defaultName = name
       location.reload()
+    }
+
+    async function loadChatMessages(name) {
+      const stored = await loadFromKv(`${name}_messages`)
+      return stored ? normalizeMessages(JSON.parse(stored)) : []
+    }
+
+    async function saveChatMessages(name, messages) {
+      await saveToKv(`${name}_messages`, JSON.stringify(normalizeMessages(messages)))
+    }
+
+    function buildUserMessage(prompt, images) {
+      const content = []
+
+      if (prompt) {
+        content.push({
+          type: 'text',
+          text: prompt,
+        })
+      }
+
+      if (Array.isArray(images)) {
+        images.forEach(image => {
+          if (!image || typeof image.data !== 'string' || typeof image.media_type !== 'string') {
+            return
+          }
+
+          content.push({
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: image.media_type,
+              data: image.data,
+            },
+          })
+        })
+      }
+
+      return {
+        role: 'user',
+        content,
+      }
+    }
+
+    function normalizeMessageBlock(block, role) {
+      if (!block || typeof block !== 'object') {
+        return null
+      }
+
+      if (block.type === 'text') {
+        const text = typeof block.text === 'string'
+          ? block.text
+          : typeof block.text?.text === 'string'
+            ? block.text.text
+            : ''
+
+        if (!text) {
+          return null
+        }
+
+        return {
+          type: 'text',
+          text,
+        }
+      }
+
+      if (role === 'user' && block.type === 'image' && block.source?.type === 'base64') {
+        return {
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: block.source.media_type,
+            data: block.source.data,
+          },
+        }
+      }
+
+      return null
+    }
+
+    function normalizeMessages(messages) {
+      if (!Array.isArray(messages)) {
+        return []
+      }
+
+      return messages
+        .map(message => {
+          if (!message || (message.role !== 'user' && message.role !== 'assistant')) {
+            return null
+          }
+
+          const content = Array.isArray(message.content)
+            ? message.content.map(block => normalizeMessageBlock(block, message.role)).filter(Boolean)
+            : []
+
+          if (!content.length) {
+            return null
+          }
+
+          return {
+            role: message.role,
+            content,
+          }
+        })
+        .filter(Boolean)
+    }
+
+    function extractMessageText(message) {
+      if (!Array.isArray(message?.content)) {
+        return ''
+      }
+
+      return message.content
+        .filter(block => block?.type === 'text' && typeof block.text === 'string')
+        .map(block => block.text)
+        .join('\n')
+    }
+
+    function renderChatMessages(messages) {
+      sel('#aiNotes article').textContent = messages
+        .map(message => `${message.role === 'assistant' ? 'assistant' : 'user'}:\n${extractMessageText(message)}`.trim())
+        .filter(Boolean)
+        .join('\n\n')
     }
 
     async function refreshChatMetaTime(name) {
@@ -202,8 +325,11 @@
           myNotesTextarea.value = await loadFromKv(key)
           sel(myNotesTextarea.value === MY_NOTES_INIT ? '#myNotesRadio' : '#promptRadio').click()
 
-          key = `${meta.name}_aiNotes`
-          sel("#aiNotes article").textContent = await loadFromKv(key)
+          chatMessages = await loadChatMessages(meta.name)
+          sel("#prompt article").textContent = [
+            `user: ${chatMessages[chatMessages.length - 2]?.content?.[0]?.text ?? ''}`,
+            `assistant: ${chatMessages[chatMessages.length - 1]?.content?.[0]?.text ?? ''}`,
+          ].join('\n').trim()
         }
         if (meta.name === localStorage.defaultName) {
           btn.click()
@@ -228,34 +354,31 @@
       const name = activeName.textContent
       const myNotesKey = `${name}_myNotes`
       const myNotesResult = await loadFromKv(myNotesKey)
-      const currentAiNotes = sel("#aiNotes article").textContent
-      const claudeResult = await callClaudeApi(
-        value, `關於我:${aboutMe}\n\n${myNotesResult}\n\n${currentAiNotes}`, name, 'claude-opus-4-6', promptImages,
-      )
+      const nextMessages = [
+        ...chatMessages,
+        buildUserMessage(value, promptImages),
+      ]
+
+      const claudeResult = await callClaudeApi({
+        messages: nextMessages,
+        system: `About me:${aboutMe}\n\n${myNotesResult}`,
+        chatName: name,
+        model: 'claude-opus-4-6',
+      })
       const aiContent = claudeResult.content
+      const updatedMessages = [
+        ...nextMessages,
+        {
+          role: 'assistant',
+          content: Array.isArray(claudeResult.raw?.content)
+            ? claudeResult.raw.content.map(block => normalizeMessageBlock(block, 'assistant')).filter(Boolean)
+            : [{ type: 'text', text: aiContent }],
+        },
+      ]
 
       sel("#prompt article").textContent = aiContent
-
-      const mergeResult = await callClaudeApi(
-        [
-          `請用繁體中文統整「${name}」的重點。`,
-          '請把「新回應」與「既有歷史重點」合併成一份精簡、可持續更新的摘要。',
-          '請去除重複，保留人物特徵、互動脈絡、重要事件、偏好與注意事項。',
-          '',
-          '既有歷史重點：',
-          currentAiNotes || '目前沒有既有摘要。',
-          '',
-          '新回應：',
-          aiContent,
-        ].join('\n'),
-        myNotesResult,
-        name,
-        HAIKU_MODEL,
-      )
-
-      const mergedAiNotes = mergeResult.content || currentAiNotes || aiContent
-      sel("#aiNotes article").textContent = mergedAiNotes
-      await saveToKv(`${name}_aiNotes`, mergedAiNotes)
+      await saveChatMessages(name, updatedMessages)
+      renderChatMessages(updatedMessages)
 
       promptImages.length = 0
       renderPromptImages()
@@ -314,10 +437,14 @@
         },
       });
       NProgress.done()
+      if (response.status === 404) {
+        await saveToKv(key, '')
+        return ''
+      }
       return (await response.json()).value;
     }
 
-    async function callClaudeApi(prompt, system, chatName, model, images) {
+    async function callClaudeApi({ messages, prompt, system, chatName, model, images }) {
       NProgress.start()
       const response = await fetch(`${localStorage.url}/claude`, {
         method: "POST",
@@ -325,7 +452,7 @@
           "Authorization": `Bearer ${localStorage.bearer}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt, system, chat_name: chatName, model, images }),
+        body: JSON.stringify({ messages, prompt, system, chat_name: chatName, model, images }),
       })
       NProgress.done()
       return await response.json()

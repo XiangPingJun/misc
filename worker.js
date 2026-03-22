@@ -1,8 +1,8 @@
 const BEARER_TOKEN_KEY = "BEARER_TOKEN";
-const CLAUDE_API_KEY_KEY = "CLAUDE_API_KEY";
+const CLAUDE_API_KEY = "CLAUDE_API_KEY";
 const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
 const CLAUDE_API_VERSION = "2023-06-01";
-const DEFAULT_MAX_TOKENS = 4096;
+const DEFAULT_MAX_TOKENS = 8192;
 
 function withCors(response) {
   const headers = new Headers(response.headers);
@@ -39,6 +39,22 @@ function extractClaudeText(content) {
     .join("\n");
 }
 
+function isValidMessageContent(content) {
+  return Array.isArray(content) && content.length > 0;
+}
+
+function isValidMessage(message) {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+
+  if (message.role !== "user" && message.role !== "assistant") {
+    return false;
+  }
+
+  return isValidMessageContent(message.content);
+}
+
 function buildMessageContent(prompt, images) {
   const content = [];
 
@@ -69,13 +85,37 @@ function buildMessageContent(prompt, images) {
   return content;
 }
 
+function buildAssistantContent(system, chatName) {
+  const parts = [];
+
+  if (typeof chatName === "string" && chatName) {
+    parts.push(`chat_name: ${chatName}`);
+  }
+
+  if (typeof system === "string" && system) {
+    parts.push(system);
+  }
+
+  if (!parts.length) {
+    return null;
+  }
+
+  return [
+    {
+      type: "text",
+      text: parts.join("\n\n"),
+      cache_control: { type: "ephemeral" },
+    },
+  ];
+}
+
 async function callClaude(env, payload) {
-  const apiKey = await env.AI_CONSULTER_KV.get(CLAUDE_API_KEY_KEY);
+  const apiKey = await env.AI_CONSULTER_KV.get(CLAUDE_API_KEY);
 
   if (!apiKey) {
     return withCors(
       Response.json(
-        { error: "Claude API key not found", key: CLAUDE_API_KEY_KEY },
+        { error: "Claude API key not found", key: CLAUDE_API_KEY },
         { status: 500 },
       ),
     );
@@ -182,7 +222,7 @@ export default {
         );
       }
 
-      const { prompt, system, chat_name, model, max_tokens, images } = await request.json();
+      const { prompt, system, chat_name, model, images, messages } = await request.json();
 
       if (prompt !== undefined && typeof prompt !== "string") {
         return withCors(
@@ -202,44 +242,65 @@ export default {
         );
       }
 
-      const messageContent = buildMessageContent(prompt, images);
+      let requestMessages = [];
 
-      if (!messageContent.length) {
-        return withCors(
-          Response.json(
-            { error: "Request body must include prompt or images" },
-            { status: 400 },
-          ),
-        );
+      if (Array.isArray(messages) && messages.length) {
+        if (!messages.every(isValidMessage)) {
+          return withCors(
+            Response.json(
+              { error: "messages must be an array of user/assistant messages with content blocks" },
+              { status: 400 },
+            ),
+          );
+        }
+
+        requestMessages = messages;
+      } else {
+        const messageContent = buildMessageContent(prompt, images);
+
+        if (!messageContent.length) {
+          return withCors(
+            Response.json(
+              { error: "Request body must include messages or prompt/images" },
+              { status: 400 },
+            ),
+          );
+        }
+
+        const assistantContent = buildAssistantContent(system, chat_name);
+
+        if (assistantContent) {
+          requestMessages.push({
+            role: "assistant",
+            content: assistantContent,
+          });
+        }
+
+        requestMessages.push({
+          role: "user",
+          content: messageContent,
+        });
       }
 
       const payload = {
         model,
-        max_tokens: Number.isFinite(max_tokens) ? max_tokens : DEFAULT_MAX_TOKENS,
-        messages: [
-          {
-            role: "user",
-            content: messageContent,
-          },
-        ],
+        max_tokens: DEFAULT_MAX_TOKENS,
+        cache_control: { type: "ephemeral" },
+        messages: requestMessages,
       };
 
-      if ((typeof system === "string" && system) || (typeof chat_name === "string" && chat_name)) {
-        const systemParts = [];
-
-        if (typeof chat_name === "string" && chat_name) {
-          systemParts.push(`chat_name: ${chat_name}`);
-        }
-
-        if (typeof system === "string" && system) {
-          systemParts.push(system);
-        }
-
+      if (typeof system === "string" && system) {
         payload.system = [
           {
             type: "text",
-            text: systemParts.join("\n\n"),
-            cache_control: { type: "ephemeral" },
+            text: typeof chat_name === "string" && chat_name ? `chat_name: ${chat_name}\n\n${system}` : system,
+          },
+        ];
+      } else if (typeof chat_name === "string" && chat_name) {
+        payload.system = [
+          {
+            type: "text",
+            text: `chat_name: ${chat_name}`,
           },
         ];
       }
