@@ -284,11 +284,36 @@
         .join('\n')
     }
 
-    function renderChatMessages(messages) {
-      sel('#aiNotes article').textContent = messages
-        .map(message => `${message.role === 'assistant' ? 'assistant' : 'user'}:\n${extractMessageText(message)}`.trim())
+    function formatChatMessagesForSummary(messages) {
+      return messages
+        .map(message => {
+          const text = extractMessageText(message)
+          if (!text) {
+            return ''
+          }
+
+          return `${message.role}:\n${text}`
+        })
         .filter(Boolean)
         .join('\n\n')
+    }
+
+    async function summarizeChatMessages() {
+      if (!chatMessages.length) {
+        sel('#aiNotes article').textContent = ''
+        return
+      }
+
+      const summaryResult = await callClaudeApi({
+        prompt: [
+          '請用繁體中文精簡整理以下對話重點。去除重複，輸出精簡條列摘要。',
+          '',
+          formatChatMessagesForSummary(chatMessages),
+        ].join('\n'),
+        model: 'claude-haiku-4-5',
+      })
+
+      sel('#aiNotes article').textContent = summaryResult.content || ''
     }
 
     async function refreshChatMetaTime(name) {
@@ -378,7 +403,6 @@
 
       sel("#prompt article").textContent = aiContent
       await saveChatMessages(name, updatedMessages)
-      renderChatMessages(updatedMessages)
 
       promptImages.length = 0
       renderPromptImages()
@@ -400,7 +424,9 @@
       } else {
         saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
       }
-      if (id === "prompt") {
+      if (id === 'aiNotes') {
+        summarizeChatMessages()
+      } else if (id === "prompt") {
         btn.disabled = false
         const textarea = sel("#prompt textarea")
         textarea.focus()
