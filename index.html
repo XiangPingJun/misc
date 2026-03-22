@@ -397,6 +397,8 @@
     }
 
     async function summarizeChatMessages(name, revision) {
+      const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
+
       if (!state.chatMessages.length) {
         sel('#aiNotes article').textContent = ''
         await saveSummary(name, '', revision)
@@ -407,6 +409,10 @@
         prompt: [
           '請用繁體中文精簡整理以下對話重點。去除重複，輸出精簡條列摘要。',
           '',
+          '我的筆記：',
+          myNotes || '目前沒有 myNotes。',
+          '',
+          '對話訊息：',
           formatChatMessagesForSummary(state.chatMessages),
         ].join('\n'),
         model: MODELS.summary,
