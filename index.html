@@ -61,7 +61,7 @@
   <main id="prompt">
     <textarea rows="4"></textarea>
     <div id="promptImages"></div>
-    <article style="white-space: pre-line;"></article>
+    <article id="promptResult" style="white-space: pre-line;"></article>
   </main>
 
   <script>
@@ -171,7 +171,7 @@
         return text ? `${message.role}: ${text}` : ''
       }).filter(Boolean)
 
-      sel('#prompt article').textContent = latest.join('\n')
+      sel('#promptResult').textContent = latest.join('\n')
     }
 
     async function fileToBase64(file) {
@@ -525,7 +525,7 @@
         buildAssistantMessage(claudeResult),
       ]
 
-      sel('#prompt article').textContent = claudeResult.content
+      sel('#promptResult').textContent = claudeResult.content
       await saveChatMessages(name, updatedMessages)
       state.chatMessages = updatedMessages
       await saveChatRevision(name, (await loadChatRevision(name)) + 1)
