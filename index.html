@@ -164,6 +164,9 @@
       await saveToKv("chatMetas", JSON.stringify(chatMetas))
       await saveToKv(`${name}_myNotes`, MY_NOTES_INIT)
       await saveToKv(`${name}_messages`, '[]')
+      await saveToKv(`${name}_messagesRevision`, '0')
+      await saveToKv(`${name}_summary`, '')
+      await saveToKv(`${name}_summaryRevision`, '-1')
       localStorage.defaultName = name
       location.reload()
     }
@@ -175,6 +178,25 @@
 
     async function saveChatMessages(name, messages) {
       await saveToKv(`${name}_messages`, JSON.stringify(normalizeMessages(messages)))
+    }
+
+    async function loadChatRevision(name) {
+      const revision = Number(await loadFromKv(`${name}_messagesRevision`))
+      return Number.isFinite(revision) ? revision : 0
+    }
+
+    async function saveChatRevision(name, revision) {
+      await saveToKv(`${name}_messagesRevision`, String(revision))
+    }
+
+    async function loadSummaryRevision(name) {
+      const revision = Number(await loadFromKv(`${name}_summaryRevision`))
+      return Number.isFinite(revision) ? revision : -1
+    }
+
+    async function saveSummary(name, summary, revision) {
+      await saveToKv(`${name}_summary`, summary)
+      await saveToKv(`${name}_summaryRevision`, String(revision))
     }
 
     function buildUserMessage(prompt, images) {
@@ -298,9 +320,10 @@
         .join('\n\n')
     }
 
-    async function summarizeChatMessages() {
+    async function summarizeChatMessages(name, revision) {
       if (!chatMessages.length) {
         sel('#aiNotes article').textContent = ''
+        await saveSummary(name, '', revision)
         return
       }
 
@@ -313,7 +336,24 @@
         model: 'claude-haiku-4-5',
       })
 
-      sel('#aiNotes article').textContent = summaryResult.content || ''
+      const summary = summaryResult.content || ''
+      sel('#aiNotes article').textContent = summary
+      await saveSummary(name, summary, revision)
+    }
+
+    async function ensureChatSummary(name) {
+      const [messageRevision, summaryRevision, storedSummary] = await Promise.all([
+        loadChatRevision(name),
+        loadSummaryRevision(name),
+        loadFromKv(`${name}_summary`),
+      ])
+
+      if (summaryRevision === messageRevision && (storedSummary || !chatMessages.length)) {
+        sel('#aiNotes article').textContent = storedSummary || ''
+        return
+      }
+
+      await summarizeChatMessages(name, messageRevision)
     }
 
     async function refreshChatMetaTime(name) {
@@ -403,6 +443,9 @@
 
       sel("#prompt article").textContent = aiContent
       await saveChatMessages(name, updatedMessages)
+      chatMessages = updatedMessages
+      const nextRevision = await loadChatRevision(name) + 1
+      await saveChatRevision(name, nextRevision)
 
       promptImages.length = 0
       renderPromptImages()
@@ -425,7 +468,7 @@
         saveToKv(`${activeName.textContent}_myNotes`, sel("#myNotes textarea").value)
       }
       if (id === 'aiNotes') {
-        summarizeChatMessages()
+        ensureChatSummary(activeName.textContent)
       } else if (id === "prompt") {
         btn.disabled = false
         const textarea = sel("#prompt textarea")
