@@ -67,8 +67,8 @@
   <script>
     const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n"
     const MODELS = {
-      chat: 'claude-opus-4-6',
-      summary: 'claude-haiku-4-5',
+      chat: 'minimax/minimax-m2.7',
+      summary: 'minimax/minimax-m2.7',
     }
     const CHAT_FIELDS = {
       myNotes: 'myNotes',
@@ -97,6 +97,14 @@
 
     function chatKey(name, field) {
       return `${name}_${field}`
+    }
+
+    function modelCacheKey(model) {
+      return encodeToVariableName(model || 'default')
+    }
+
+    function chatModelKey(name, field, model) {
+      return chatKey(name, `${field}_${modelCacheKey(model)}`)
     }
 
     function parseJson(value, fallback) {
@@ -262,14 +270,14 @@
       await saveToKv(chatKey(name, CHAT_FIELDS.messagesRevision), String(revision))
     }
 
-    async function loadSummaryRevision(name) {
-      return loadNumberFromKv(chatKey(name, CHAT_FIELDS.summaryRevision), -1)
+    async function loadSummaryRevision(name, model) {
+      return loadNumberFromKv(chatModelKey(name, CHAT_FIELDS.summaryRevision, model), -1)
     }
 
-    async function saveSummary(name, summary, revision) {
+    async function saveSummary(name, model, summary, revision) {
       await Promise.all([
-        saveToKv(chatKey(name, CHAT_FIELDS.summary), summary),
-        saveToKv(chatKey(name, CHAT_FIELDS.summaryRevision), String(revision)),
+        saveToKv(chatModelKey(name, CHAT_FIELDS.summary, model), summary),
+        saveToKv(chatModelKey(name, CHAT_FIELDS.summaryRevision, model), String(revision)),
       ])
     }
 
@@ -306,14 +314,15 @@
       }
     }
 
-    function buildAssistantMessage(claudeResult) {
-      const content = Array.isArray(claudeResult.raw?.content)
-        ? claudeResult.raw.content.map(block => normalizeMessageBlock(block, 'assistant')).filter(Boolean)
+    function buildAssistantMessage(modelResult) {
+      const rawContent = modelResult.raw?.choices?.[0]?.message?.content
+      const content = Array.isArray(rawContent)
+        ? rawContent.map(block => normalizeMessageBlock(block, 'assistant')).filter(Boolean)
         : []
 
       return {
         role: 'assistant',
-        content: content.length ? content : [{ type: 'text', text: claudeResult.content || '' }],
+        content: content.length ? content : [{ type: 'text', text: modelResult.content || '' }],
       }
     }
 
@@ -405,7 +414,7 @@
         return
       }
 
-      const summaryResult = await callClaudeApi({
+      const summaryResult = await callOpenRouterApi({
         prompt: [
           '請用繁體中文精簡整理以下對話重點。去除重複，輸出精簡條列摘要。',
           '',
@@ -420,14 +429,14 @@
 
       const summary = summaryResult.content || ''
       sel('#aiNotes article').textContent = summary
-      await saveSummary(name, summary, revision)
+      await saveSummary(name, MODELS.summary, summary, revision)
     }
 
     async function ensureChatSummary(name) {
       const [messageRevision, summaryRevision, storedSummary] = await Promise.all([
         loadChatRevision(name),
-        loadSummaryRevision(name),
-        loadFromKv(chatKey(name, CHAT_FIELDS.summary)),
+        loadSummaryRevision(name, MODELS.summary),
+        loadFromKv(chatModelKey(name, CHAT_FIELDS.summary, MODELS.summary)),
       ])
 
       if (summaryRevision === messageRevision && (storedSummary || !state.chatMessages.length)) {
@@ -519,7 +528,7 @@
         buildUserMessage(prompt, promptImages),
       ]
 
-      const claudeResult = await callClaudeApi({
+      const modelResult = await callOpenRouterApi({
         messages: nextMessages,
         system: `About me:${state.aboutMe}\n\n${myNotes}`,
         chatName: name,
@@ -528,10 +537,10 @@
 
       const updatedMessages = [
         ...nextMessages,
-        buildAssistantMessage(claudeResult),
+        buildAssistantMessage(modelResult),
       ]
 
-      sel('#promptResult').textContent = claudeResult.content
+      sel('#promptResult').textContent = modelResult.content
       await saveChatMessages(name, updatedMessages)
       state.chatMessages = updatedMessages
       await saveChatRevision(name, (await loadChatRevision(name)) + 1)
@@ -625,9 +634,9 @@
       return (await response.json()).value
     }
 
-    async function callClaudeApi({ messages, prompt, system, chatName, model, images }) {
+    async function callOpenRouterApi({ messages, prompt, system, chatName, model, images }) {
       NProgress.start()
-      const response = await fetch(`${localStorage.url}/claude`, {
+      const response = await fetch(`${localStorage.url}/openrouter`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${localStorage.bearer}`,

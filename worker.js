@@ -1,7 +1,6 @@
 const BEARER_TOKEN_KEY = "BEARER_TOKEN";
-const CLAUDE_API_KEY = "CLAUDE_API_KEY";
-const CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
-const CLAUDE_API_VERSION = "2023-06-01";
+const OPENROUTER_API_KEY = "OPENROUTER_API_KEY";
+const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MAX_TOKENS = 8192;
 
 function withCors(response) {
@@ -28,14 +27,28 @@ async function isAuthorized(request, env) {
   return authHeader === `Bearer ${bearerToken}`;
 }
 
-function extractClaudeText(content) {
+function extractOpenRouterText(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+
   if (!Array.isArray(content)) {
     return "";
   }
 
   return content
-    .filter((block) => block?.type === "text" && typeof block.text === "string")
-    .map((block) => block.text)
+    .map((block) => {
+      if (typeof block === "string") {
+        return block;
+      }
+
+      if (typeof block?.text === "string") {
+        return block.text;
+      }
+
+      return "";
+    })
+    .filter(Boolean)
     .join("\n");
 }
 
@@ -85,7 +98,7 @@ function buildMessageContent(prompt, images) {
   return content;
 }
 
-function buildAssistantContent(system, chatName) {
+function buildSystemText(system, chatName) {
   const parts = [];
 
   if (typeof chatName === "string" && chatName) {
@@ -100,44 +113,74 @@ function buildAssistantContent(system, chatName) {
     return null;
   }
 
-  return [
-    {
-      type: "text",
-      text: parts.join("\n\n"),
-      cache_control: { type: "ephemeral" },
-    },
-  ];
+  return parts.join("\n\n");
 }
 
-async function callClaude(env, payload) {
-  const apiKey = await env.AI_CONSULTER_KV.get(CLAUDE_API_KEY);
+function toOpenRouterContent(content) {
+  return content
+    .map((block) => {
+      if (block?.type === "text" && typeof block.text === "string") {
+        return {
+          type: "text",
+          text: block.text,
+        };
+      }
+
+      if (
+        block?.type === "image"
+        && block.source?.type === "base64"
+        && typeof block.source.media_type === "string"
+        && typeof block.source.data === "string"
+      ) {
+        return {
+          type: "image_url",
+          image_url: {
+            url: `data:${block.source.media_type};base64,${block.source.data}`,
+          },
+        };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+}
+
+function toOpenRouterMessages(messages) {
+  return messages.map((message) => ({
+    role: message.role,
+    content: toOpenRouterContent(message.content),
+  }));
+}
+
+async function callOpenRouter(env, payload) {
+  const apiKey = await env.AI_CONSULTER_KV.get(OPENROUTER_API_KEY);
 
   if (!apiKey) {
     return withCors(
       Response.json(
-        { error: "Claude API key not found", key: CLAUDE_API_KEY },
+        { error: "OpenRouter API key not found", key: OPENROUTER_API_KEY },
         { status: 500 },
       ),
     );
   }
 
-  const response = await fetch(CLAUDE_API_URL, {
+  const response = await fetch(OPENROUTER_API_URL, {
     method: "POST",
     headers: {
-      "anthropic-version": CLAUDE_API_VERSION,
+      Authorization: `Bearer ${apiKey}`,
       "content-type": "application/json",
-      "x-api-key": apiKey,
     },
     body: JSON.stringify(payload),
   });
 
   const data = await response.json();
+  const message = data?.choices?.[0]?.message;
 
   if (!response.ok) {
     return withCors(
       Response.json(
         {
-          error: "Claude API request failed",
+          error: "OpenRouter API request failed",
           status: response.status,
           details: data,
         },
@@ -149,11 +192,11 @@ async function callClaude(env, payload) {
   return withCors(
     Response.json({
       id: data.id,
-      model: data.model,
-      role: data.role,
-      stop_reason: data.stop_reason,
+      model: data.model || payload.model,
+      role: message?.role || "assistant",
+      stop_reason: data.choices?.[0]?.finish_reason || null,
       usage: data.usage,
-      content: extractClaudeText(data.content),
+      content: extractOpenRouterText(message?.content),
       raw: data,
     }),
   );
@@ -215,7 +258,7 @@ export default {
       return withCors(Response.json({ ok: true, key, value: String(value) }));
     }
 
-    if (request.method === "POST" && url.pathname === "/claude") {
+    if (request.method === "POST" && url.pathname === "/openrouter") {
       if (!(await isAuthorized(request, env))) {
         return withCors(
           Response.json({ error: "Unauthorized" }, { status: 401 }),
@@ -267,45 +310,34 @@ export default {
           );
         }
 
-        const assistantContent = buildAssistantContent(system, chat_name);
-
-        if (assistantContent) {
-          requestMessages.push({
-            role: "assistant",
-            content: assistantContent,
-          });
-        }
-
         requestMessages.push({
           role: "user",
           content: messageContent,
         });
       }
 
+      const systemText = buildSystemText(system, chat_name);
+      const payloadMessages = toOpenRouterMessages(requestMessages);
+
+      if (systemText) {
+        payloadMessages.unshift({
+          role: "system",
+          content: [
+            {
+              type: "text",
+              text: systemText,
+            },
+          ],
+        });
+      }
+
       const payload = {
         model,
         max_tokens: DEFAULT_MAX_TOKENS,
-        cache_control: { type: "ephemeral" },
-        messages: requestMessages,
+        messages: payloadMessages,
       };
 
-      if (typeof system === "string" && system) {
-        payload.system = [
-          {
-            type: "text",
-            text: typeof chat_name === "string" && chat_name ? `chat_name: ${chat_name}\n\n${system}` : system,
-          },
-        ];
-      } else if (typeof chat_name === "string" && chat_name) {
-        payload.system = [
-          {
-            type: "text",
-            text: `chat_name: ${chat_name}`,
-          },
-        ];
-      }
-
-      return callClaude(env, payload);
+      return callOpenRouter(env, payload);
     }
 
     return withCors(
@@ -314,7 +346,7 @@ export default {
         routes: {
           read: "GET /kv/:key",
           write: "POST /kv",
-          claude: "POST /claude",
+          openrouter: "POST /openrouter",
         },
       }),
     );
