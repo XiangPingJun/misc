@@ -16,61 +16,23 @@
     main,
     header {
       padding: 0 !important;
-      display: none;
     }
   </style>
 </head>
 
 <body style="padding: var(--pico-spacing);">
-  <header>
-    <div style="display: flex; align-items: center; gap: calc(var(--pico-spacing)/2); margin-bottom: var(--pico-spacing);">
-      <div id="activeName" style="margin: 0;"></div>
-      <details class="dropdown" style="margin: 0;">
-        <summary id="activatedFeature" role="button" class="outline"></summary>
-        <ul>
-          <li onclick="activateFeature('myNotes')"><a href="#">前言</a></li>
-          <li onclick="activateFeature('aiNotes')"><a href="#">總結</a></li>
-          <li onclick="activateFeature('chat')"><a href="#">聊天</a></li>
-        </ul>
-      </details>
-      <button onclick="sendPrompt()">送出</button>
-      <button onclick="back()" class="outline">返回</button>
-    </div>
-  </header>
+  <div id="app"></div>
 
-  <main id="credentials" class="container">
-    <input id="urlInput" type="text" placeholder="URL">
-    <input id="bearerInput" type="text" placeholder="Bearer">
-    <button onclick="setCredentials()">Confirm</button>
-  </main>
+  <script type="module">
+    import { h, render } from 'https://esm.sh/preact@10.26.4'
+    import { useEffect, useRef, useState } from 'https://esm.sh/preact@10.26.4/hooks'
+    import htm from 'https://esm.sh/htm@3.1.1'
 
-  <main id="chatNames">
-    <template id="chatNameTemplate">
-      <button></button>
-    </template>
-    <button onclick="add()">＋</button>
-    <button onclick="remove()">－</button>
-  </main>
-
-  <main id="myNotes">
-    <textarea rows="12"></textarea>
-  </main>
-
-  <main id="aiNotes">
-    <article style="white-space: pre-line;"></article>
-  </main>
-
-  <main id="prompt">
-    <textarea rows="4"></textarea>
-    <div id="promptImages"></div>
-    <article id="promptResult" style="white-space: pre-line;"></article>
-  </main>
-
-  <script>
+    const html = htm.bind(h)
     const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生9種簡單的回應訊息， 你要關心/傾聽/幽默/地獄梗/不傷害對方:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n"
     const MODELS = {
       chat: 'minimax/minimax-m2.7',
-      imageAnalysis: 'qwen/qwen2.5-vl-72b-instruct',
+      imageAnalysis: 'google/gemini-3.1-pro-preview',
       summary: 'minimax/minimax-m2.7',
     }
     const CHAT_FIELDS = {
@@ -79,24 +41,6 @@
       messagesRevision: 'messagesRevision',
       summary: 'summary',
       summaryRevision: 'summaryRevision',
-    }
-    let promptImages = []
-    const state = {
-      aboutMe: '',
-      activeFeature: '',
-      chatMessages: [],
-    }
-
-    function sel(selector) {
-      return document.querySelector(selector)
-    }
-
-    function selAll(selector) {
-      return document.querySelectorAll(selector)
-    }
-
-    function activeChatName() {
-      return sel('#activeName').textContent.trim()
     }
 
     function chatKey(name, field) {
@@ -123,21 +67,6 @@
       }
     }
 
-    function hideAllMains() {
-      selAll('main').forEach(main => {
-        main.style.display = 'none'
-      })
-    }
-
-    function showMain(id) {
-      hideAllMains()
-      sel(`#${id}`).style.display = 'block'
-    }
-
-    function setHeaderVisible(visible) {
-      sel('header').style.display = visible ? 'block' : 'none'
-    }
-
     function formatChatName(meta) {
       const timestamp = Number(meta.time)
       if (!Number.isFinite(timestamp)) {
@@ -154,216 +83,8 @@
       return dayDiff > 4 ? `${meta.name}-${dayDiff}` : meta.name
     }
 
-    function renderPromptImages() {
-      const container = sel('#promptImages')
-      container.innerHTML = ''
-
-      promptImages.forEach((image, index) => {
-        const wrapper = document.createElement('article')
-        wrapper.style.display = 'inline-block'
-        wrapper.style.marginRight = 'var(--pico-spacing)'
-        wrapper.style.marginBottom = 'var(--pico-spacing)'
-
-        const preview = document.createElement('img')
-        preview.src = `data:${image.media_type};base64,${image.data}`
-        preview.alt = `pasted-image-${index + 1}`
-        preview.style.maxWidth = '160px'
-        preview.style.maxHeight = '160px'
-        preview.style.display = 'block'
-        preview.style.marginBottom = '0.5rem'
-
-        wrapper.appendChild(preview)
-        container.appendChild(wrapper)
-      })
-    }
-
-    function renderLatestExchange(messages) {
-      const latest = messages.slice(-2).map(message => {
-        const text = extractMessageText(message)
-        return text ? `${message.role}: ${text}` : ''
-      }).filter(Boolean)
-
-      sel('#promptResult').textContent = latest.join('\n')
-    }
-
-    async function fileToBase64(file) {
-      const dataUrl = await new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(reader.result)
-        reader.onerror = () => reject(reader.error)
-        reader.readAsDataURL(file)
-      })
-
-      const [meta, base64] = dataUrl.split(',')
-      const mediaType = meta.match(/data:(.*);base64/)[1]
-      return { media_type: mediaType, data: base64 }
-    }
-
-    async function onPromptPaste(event) {
-      const items = Array.from(event.clipboardData?.items || [])
-      const imageItems = items.filter(item => item.type.startsWith('image/'))
-
-      if (!imageItems.length) {
-        return
-      }
-
-      event.preventDefault()
-
-      for (const item of imageItems) {
-        const file = item.getAsFile()
-        if (!file) {
-          continue
-        }
-
-        promptImages.push(await fileToBase64(file))
-      }
-
-      renderPromptImages()
-    }
-
-    async function loadChatMetas() {
-      return parseJson(await loadFromKv('chatMetas'), [])
-    }
-
-    async function saveChatMetas(chatMetas) {
-      await saveToKv('chatMetas', JSON.stringify(chatMetas))
-    }
-
-    async function add() {
-      const input = prompt()
-      if (!input) {
-        return
-      }
-
-      const name = encodeToVariableName(input)
-      const chatMetas = await loadChatMetas()
-      chatMetas.push({ name, time: Date.now() })
-
-      hideAllMains()
-      await saveChatMetas(chatMetas)
-      await Promise.all([
-        saveToKv(chatKey(name, CHAT_FIELDS.myNotes), MY_NOTES_INIT),
-        saveToKv(chatKey(name, CHAT_FIELDS.messages), '[]'),
-        saveToKv(chatKey(name, CHAT_FIELDS.messagesRevision), '0'),
-        saveToKv(chatKey(name, CHAT_FIELDS.summary), ''),
-        saveToKv(chatKey(name, CHAT_FIELDS.summaryRevision), '-1'),
-      ])
-
-      localStorage.defaultName = name
-      location.reload()
-    }
-
-    function findChatMetaByInput(chatMetas, input) {
-      if (!input) {
-        return null
-      }
-
-      const normalizedInput = input.trim()
-      if (!normalizedInput) {
-        return null
-      }
-
-      const encodedInput = encodeToVariableName(normalizedInput)
-      return chatMetas.find(meta => {
-        return meta.name === normalizedInput || meta.name === encodedInput
-      }) || null
-    }
-
-    function buildChatDeleteKeys(name) {
-      return [
-        chatKey(name, CHAT_FIELDS.myNotes),
-        chatKey(name, CHAT_FIELDS.messages),
-        chatKey(name, CHAT_FIELDS.messagesRevision),
-        chatKey(name, CHAT_FIELDS.summary),
-        chatKey(name, CHAT_FIELDS.summaryRevision),
-        chatModelKey(name, CHAT_FIELDS.summary, MODELS.summary),
-        chatModelKey(name, CHAT_FIELDS.summaryRevision, MODELS.summary),
-      ]
-    }
-
-    function removeChatButton(name) {
-      sel(`#chatNames button[data-chat-name="${CSS.escape(name)}"]`)?.remove()
-    }
-
-    function resetActiveChatView() {
-      state.activeFeature = ''
-      state.chatMessages = []
-      sel('#activeName').textContent = ''
-      sel('#activatedFeature').textContent = ''
-      sel('#myNotes textarea').value = ''
-      sel('#aiNotes article').textContent = ''
-      sel('#promptResult').textContent = ''
-      clearPromptInput()
-      setHeaderVisible(false)
-      showMain('chatNames')
-    }
-
-    function back() {
-      if (activeChatName()) {
-        persistCurrentMyNotes()
-      }
-
-      resetActiveChatView()
-    }
-
-    async function remove() {
-      const input = prompt()
-      if (!input) {
-        return
-      }
-
-      const chatMetas = await loadChatMetas()
-      const targetMeta = findChatMetaByInput(chatMetas, input)
-      if (!targetMeta) {
-        alert('找不到指定的聊天')
-        return
-      }
-
-      const targetName = targetMeta.name
-      const remainingChatMetas = chatMetas.filter(meta => meta.name !== targetName)
-
-      await Promise.all([
-        saveChatMetas(remainingChatMetas),
-        ...buildChatDeleteKeys(targetName).map(key => deleteFromKv(key)),
-      ])
-
-      removeChatButton(targetName)
-
-      if (activeChatName() === targetName) {
-        resetActiveChatView()
-      }
-    }
-
-    async function loadChatMessages(name) {
-      return normalizeMessages(parseJson(await loadFromKv(chatKey(name, CHAT_FIELDS.messages)), []))
-    }
-
-    async function saveChatMessages(name, messages) {
-      await saveToKv(chatKey(name, CHAT_FIELDS.messages), JSON.stringify(normalizeMessages(messages)))
-    }
-
-    async function loadNumberFromKv(key, fallback) {
-      const value = Number(await loadFromKv(key))
-      return Number.isFinite(value) ? value : fallback
-    }
-
-    async function loadChatRevision(name) {
-      return loadNumberFromKv(chatKey(name, CHAT_FIELDS.messagesRevision), 0)
-    }
-
-    async function saveChatRevision(name, revision) {
-      await saveToKv(chatKey(name, CHAT_FIELDS.messagesRevision), String(revision))
-    }
-
-    async function loadSummaryRevision(name, model) {
-      return loadNumberFromKv(chatModelKey(name, CHAT_FIELDS.summaryRevision, model), -1)
-    }
-
-    async function saveSummary(name, model, summary, revision) {
-      await Promise.all([
-        saveToKv(chatModelKey(name, CHAT_FIELDS.summary, model), summary),
-        saveToKv(chatModelKey(name, CHAT_FIELDS.summaryRevision, model), String(revision)),
-      ])
+    function sortChatMetas(chatMetas) {
+      return [...chatMetas].sort((a, b) => a.time - b.time)
     }
 
     function buildUserMessage(prompt, images) {
@@ -434,20 +155,6 @@
       return sections.join('\n\n')
     }
 
-    async function analyzePromptImages(prompt, images) {
-      if (!images.length) {
-        return ''
-      }
-
-      const analysisMessage = buildUserMessage(buildImageAnalysisPrompt(prompt), images)
-      const analysisResult = await callOpenRouterApi({
-        messages: [analysisMessage],
-        model: MODELS.imageAnalysis,
-      })
-
-      return analysisResult.content || ''
-    }
-
     function normalizeMessageBlock(block, role) {
       if (!block || typeof block !== 'object') {
         return null
@@ -516,15 +223,156 @@
       }).filter(Boolean).join('\n\n')
     }
 
-    async function summarizeChatMessages(name, revision) {
-      const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
+    function latestExchangeText(messages) {
+      return messages.slice(-2).map(message => {
+        const text = extractMessageText(message)
+        return text ? `${message.role}: ${text}` : ''
+      }).filter(Boolean).join('\n')
+    }
 
-      if (!state.chatMessages.length) {
-        sel('#aiNotes article').textContent = ''
-        await saveSummary(name, '', revision)
-        return
+    async function fileToBase64(file) {
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result)
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+
+      const [meta, base64] = dataUrl.split(',')
+      const mediaType = meta.match(/data:(.*);base64/)[1]
+      return { media_type: mediaType, data: base64 }
+    }
+
+    async function saveToKv(key, value) {
+      NProgress.start()
+      try {
+        const response = await fetch(`${localStorage.url}/kv`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${localStorage.bearer}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ key, value }),
+        })
+        return await response.json()
+      } finally {
+        NProgress.done()
+      }
+    }
+
+    async function loadFromKv(key) {
+      NProgress.start()
+      try {
+        const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
+          headers: {
+            Authorization: `Bearer ${localStorage.bearer}`,
+          },
+        })
+
+        if (response.status === 404) {
+          await saveToKv(key, '')
+          return ''
+        }
+
+        return (await response.json()).value
+      } finally {
+        NProgress.done()
+      }
+    }
+
+    async function deleteFromKv(key) {
+      NProgress.start()
+      try {
+        const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${localStorage.bearer}`,
+          },
+        })
+        return await response.json()
+      } finally {
+        NProgress.done()
+      }
+    }
+
+    async function callOpenRouterApi({ messages, prompt, system, chatName, model, images }) {
+      NProgress.start()
+      try {
+        const response = await fetch(`${localStorage.url}/openrouter`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${localStorage.bearer}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ messages, prompt, system, chat_name: chatName, model, images }),
+        })
+        return await response.json()
+      } finally {
+        NProgress.done()
+      }
+    }
+
+    async function loadChatMetas() {
+      return parseJson(await loadFromKv('chatMetas'), [])
+    }
+
+    async function saveChatMetas(chatMetas) {
+      await saveToKv('chatMetas', JSON.stringify(chatMetas))
+    }
+
+    async function loadChatMessages(name) {
+      return normalizeMessages(parseJson(await loadFromKv(chatKey(name, CHAT_FIELDS.messages)), []))
+    }
+
+    async function saveChatMessages(name, messages) {
+      await saveToKv(chatKey(name, CHAT_FIELDS.messages), JSON.stringify(normalizeMessages(messages)))
+    }
+
+    async function loadNumberFromKv(key, fallback) {
+      const value = Number(await loadFromKv(key))
+      return Number.isFinite(value) ? value : fallback
+    }
+
+    async function loadChatRevision(name) {
+      return loadNumberFromKv(chatKey(name, CHAT_FIELDS.messagesRevision), 0)
+    }
+
+    async function saveChatRevision(name, revision) {
+      await saveToKv(chatKey(name, CHAT_FIELDS.messagesRevision), String(revision))
+    }
+
+    async function loadSummaryRevision(name, model) {
+      return loadNumberFromKv(chatModelKey(name, CHAT_FIELDS.summaryRevision, model), -1)
+    }
+
+    async function saveSummary(name, model, summary, revision) {
+      await Promise.all([
+        saveToKv(chatModelKey(name, CHAT_FIELDS.summary, model), summary),
+        saveToKv(chatModelKey(name, CHAT_FIELDS.summaryRevision, model), String(revision)),
+      ])
+    }
+
+    async function analyzePromptImages(prompt, images) {
+      if (!images.length) {
+        return ''
       }
 
+      const analysisMessage = buildUserMessage(buildImageAnalysisPrompt(prompt), images)
+      const analysisResult = await callOpenRouterApi({
+        messages: [analysisMessage],
+        model: MODELS.imageAnalysis,
+      })
+
+      return analysisResult.content || ''
+    }
+
+    async function summarizeChatMessages(name, messages, myNotes) {
+      if (!messages.length) {
+        await saveSummary(name, MODELS.summary, '', await loadChatRevision(name))
+        return ''
+      }
+
+      const revision = await loadChatRevision(name)
       const summaryResult = await callOpenRouterApi({
         prompt: [
           '請用繁體中文精簡整理以下對話重點。去除重複，輸出精簡條列摘要。',
@@ -533,164 +381,336 @@
           myNotes || '目前沒有 myNotes。',
           '',
           '對話訊息：',
-          formatChatMessagesForSummary(state.chatMessages),
+          formatChatMessagesForSummary(messages),
         ].join('\n'),
         model: MODELS.summary,
       })
 
       const summary = summaryResult.content || ''
-      sel('#aiNotes article').textContent = summary
       await saveSummary(name, MODELS.summary, summary, revision)
+      return summary
     }
 
-    async function ensureChatSummary(name) {
+    async function ensureChatSummary(name, messages, myNotes) {
       const [messageRevision, summaryRevision, storedSummary] = await Promise.all([
         loadChatRevision(name),
         loadSummaryRevision(name, MODELS.summary),
         loadFromKv(chatModelKey(name, CHAT_FIELDS.summary, MODELS.summary)),
       ])
 
-      if (summaryRevision === messageRevision && (storedSummary || !state.chatMessages.length)) {
-        sel('#aiNotes article').textContent = storedSummary || ''
-        return
+      if (summaryRevision === messageRevision && (storedSummary || !messages.length)) {
+        return storedSummary || ''
       }
 
-      await summarizeChatMessages(name, messageRevision)
+      return summarizeChatMessages(name, messages, myNotes)
     }
 
     async function refreshChatMetaTime(name) {
       const chatMetas = await loadChatMetas()
       const meta = chatMetas.find(item => item.name === name)
       if (!meta) {
-        return
+        return sortChatMetas(chatMetas)
       }
 
       meta.time = Date.now()
       await saveChatMetas(chatMetas)
+      return sortChatMetas(chatMetas)
     }
 
-    async function loadActiveChat(name) {
-      const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
-      state.chatMessages = await loadChatMessages(name)
+    function App() {
+      const [isReady, setIsReady] = useState(false)
+      const [requiresCredentials, setRequiresCredentials] = useState(false)
+      const [urlInput, setUrlInput] = useState(localStorage.url || '')
+      const [bearerInput, setBearerInput] = useState(localStorage.bearer || '')
+      const [aboutMe, setAboutMe] = useState('')
+      const [chatMetas, setChatMetasState] = useState([])
+      const [activeChatName, setActiveChatName] = useState('')
+      const [activeFeature, setActiveFeature] = useState('')
+      const [chatMessages, setChatMessages] = useState([])
+      const [myNotes, setMyNotes] = useState('')
+      const [summaryText, setSummaryText] = useState('')
+      const [promptTextValue, setPromptTextValue] = useState('')
+      const [promptImages, setPromptImages] = useState([])
+      const [promptResult, setPromptResult] = useState('')
+      const promptTextareaRef = useRef(null)
+      const myNotesTextareaRef = useRef(null)
 
-      activeName.textContent = name
-      setHeaderVisible(true)
+      useEffect(() => {
+        void init()
+      }, [])
 
-      const myNotesTextarea = sel('#myNotes textarea')
-      myNotesTextarea.value = myNotes
-      renderLatestExchange(state.chatMessages)
+      useEffect(() => {
+        if (!activeChatName) {
+          return
+        }
 
-      activateFeature(myNotes === MY_NOTES_INIT ? 'myNotes' : 'chat', false)
-    }
+        if (activeFeature === 'myNotes') {
+          myNotesTextareaRef.current?.focus()
+          return
+        }
 
-    function createChatButton(meta) {
-      const clone = sel('#chatNameTemplate').content.cloneNode(true)
-      const btn = clone.querySelector('button')
+        if (activeFeature === 'chat') {
+          promptTextareaRef.current?.focus()
+        }
+      }, [activeFeature, activeChatName])
 
-      btn.dataset.chatName = meta.name
-      btn.textContent = formatChatName(meta)
-      btn.onclick = async () => {
-        await loadActiveChat(meta.name)
+      useEffect(() => {
+        if (activeFeature !== 'aiNotes' || !activeChatName) {
+          return
+        }
+
+        void (async () => {
+          const summary = await ensureChatSummary(activeChatName, chatMessages, myNotes)
+          setSummaryText(summary)
+        })()
+      }, [activeFeature, activeChatName, chatMessages, myNotes])
+
+      async function init() {
+        if (!localStorage.url || !localStorage.bearer || location.search === '?reset') {
+          setRequiresCredentials(true)
+          setIsReady(true)
+          return
+        }
+
+        const [loadedAboutMe, loadedChatMetas] = await Promise.all([
+          loadFromKv('ABOUT_ME'),
+          loadChatMetas(),
+        ])
+
+        const sortedChatMetas = sortChatMetas(loadedChatMetas)
+        setAboutMe(loadedAboutMe)
+        setChatMetasState(sortedChatMetas)
+
+        if (localStorage.defaultName && sortedChatMetas.some(meta => meta.name === localStorage.defaultName)) {
+          const defaultName = localStorage.defaultName
+          localStorage.removeItem('defaultName')
+          await openChat(defaultName)
+        }
+
+        setIsReady(true)
       }
 
-      if (meta.name === localStorage.defaultName) {
-        btn.click()
-        localStorage.removeItem('defaultName')
+      async function openChat(name) {
+        const [loadedMyNotes, loadedMessages] = await Promise.all([
+          loadFromKv(chatKey(name, CHAT_FIELDS.myNotes)),
+          loadChatMessages(name),
+        ])
+
+        setActiveChatName(name)
+        setMyNotes(loadedMyNotes)
+        setChatMessages(loadedMessages)
+        setSummaryText('')
+        setPromptResult(latestExchangeText(loadedMessages))
+        setPromptTextValue('')
+        setPromptImages([])
+        setActiveFeature(loadedMyNotes === MY_NOTES_INIT ? 'myNotes' : 'chat')
       }
 
-      return clone
-    }
+      async function persistCurrentMyNotes() {
+        if (!activeChatName) {
+          return
+        }
 
-    async function init() {
-      if (!localStorage.url || !localStorage.bearer || location.search === '?reset') {
-        setHeaderVisible(false)
-        showMain('credentials')
-        return
+        await saveToKv(chatKey(activeChatName, CHAT_FIELDS.myNotes), myNotes)
       }
 
-      state.aboutMe = await loadFromKv('ABOUT_ME')
-      const chatMetas = await loadChatMetas()
-      const container = sel('#chatNames')
+      async function activateFeature(nextFeature, persist = true) {
+        if (!activeChatName) {
+          return
+        }
 
-      chatMetas.sort((a, b) => a.time - b.time).forEach(meta => {
-        container.appendChild(createChatButton(meta))
-      })
+        if (persist && activeFeature === 'myNotes' && nextFeature !== 'myNotes') {
+          await persistCurrentMyNotes()
+        }
 
-      showMain('chatNames')
-    }
-
-    function clearPromptInput() {
-      promptImages = []
-      renderPromptImages()
-      sel('#prompt textarea').value = ''
-    }
-
-    async function sendPrompt() {
-      const textarea = sel('#prompt textarea')
-      const prompt = textarea.value.trim()
-      if (!prompt && !promptImages.length) {
-        return
+        setActiveFeature(nextFeature)
       }
 
-      const name = activeChatName()
-      const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
-      const imageSummary = await analyzePromptImages(prompt, promptImages)
-      const promptText = buildPromptText(prompt, imageSummary)
-      const requestUserMessage = buildUserMessage(promptText, [])
-      const persistedUserMessage = buildUserMessage(promptText, [])
-      const persistedUserMessages = persistedUserMessage.content.length ? [persistedUserMessage] : []
-      const requestMessages = [
-        ...state.chatMessages,
-        requestUserMessage,
-      ]
-      const nextMessages = [
-        ...state.chatMessages,
-        ...persistedUserMessages,
-      ]
-
-      const modelResult = await callOpenRouterApi({
-        messages: requestMessages,
-        system: [
-          '所有對話必須使用台灣用語',
-          '關於我：',
-          state.aboutMe || '目前沒有關於我。',
-          '',
-          '我的筆記：',
-          myNotes || '目前沒有 myNotes。',
-        ].join('\n'),
-        chatName: name,
-        model: MODELS.chat,
-      })
-
-      const mergedContent = modelResult.content || ''
-
-      const updatedMessages = [
-        ...nextMessages,
-        buildAssistantTextMessage(mergedContent),
-      ]
-
-      sel('#promptResult').textContent = mergedContent
-      await saveChatMessages(name, updatedMessages)
-      state.chatMessages = updatedMessages
-      await saveChatRevision(name, (await loadChatRevision(name)) + 1)
-
-      clearPromptInput()
-      await refreshChatMetaTime(name)
-    }
-
-    function persistCurrentMyNotes() {
-      const name = activeChatName()
-      if (!name) {
-        return
+      function resetActiveChatView() {
+        setActiveChatName('')
+        setActiveFeature('')
+        setChatMessages([])
+        setMyNotes('')
+        setSummaryText('')
+        setPromptTextValue('')
+        setPromptImages([])
+        setPromptResult('')
       }
 
-      saveToKv(chatKey(name, CHAT_FIELDS.myNotes), sel('#myNotes textarea').value)
-    }
+      async function back() {
+        if (activeChatName) {
+          await persistCurrentMyNotes()
+        }
 
-    function activateFeature(id, persistMyNotes = true) {
-      state.activeFeature = id
-      sel('#activatedFeature').textContent = (() => {
-        switch (id) {
+        resetActiveChatView()
+      }
+
+      async function add() {
+        const input = prompt()
+        if (!input) {
+          return
+        }
+
+        const name = encodeToVariableName(input)
+        const nextChatMetas = sortChatMetas([
+          ...chatMetas,
+          { name, time: Date.now() },
+        ])
+
+        await saveChatMetas(nextChatMetas)
+        await Promise.all([
+          saveToKv(chatKey(name, CHAT_FIELDS.myNotes), MY_NOTES_INIT),
+          saveToKv(chatKey(name, CHAT_FIELDS.messages), '[]'),
+          saveToKv(chatKey(name, CHAT_FIELDS.messagesRevision), '0'),
+          saveToKv(chatKey(name, CHAT_FIELDS.summary), ''),
+          saveToKv(chatKey(name, CHAT_FIELDS.summaryRevision), '-1'),
+        ])
+
+        setChatMetasState(nextChatMetas)
+        await openChat(name)
+      }
+
+      async function remove() {
+        const input = prompt()
+        if (!input) {
+          return
+        }
+
+        const normalizedInput = input.trim()
+        const encodedInput = encodeToVariableName(normalizedInput)
+        const targetMeta = chatMetas.find(meta => {
+          return meta.name === normalizedInput || meta.name === encodedInput
+        })
+
+        if (!targetMeta) {
+          alert('找不到指定的聊天')
+          return
+        }
+
+        const targetName = targetMeta.name
+        const remainingChatMetas = chatMetas.filter(meta => meta.name !== targetName)
+        const keysToDelete = [
+          chatKey(targetName, CHAT_FIELDS.myNotes),
+          chatKey(targetName, CHAT_FIELDS.messages),
+          chatKey(targetName, CHAT_FIELDS.messagesRevision),
+          chatKey(targetName, CHAT_FIELDS.summary),
+          chatKey(targetName, CHAT_FIELDS.summaryRevision),
+          chatModelKey(targetName, CHAT_FIELDS.summary, MODELS.summary),
+          chatModelKey(targetName, CHAT_FIELDS.summaryRevision, MODELS.summary),
+        ]
+
+        await Promise.all([
+          saveChatMetas(remainingChatMetas),
+          ...keysToDelete.map(key => deleteFromKv(key)),
+        ])
+
+        setChatMetasState(sortChatMetas(remainingChatMetas))
+
+        if (activeChatName === targetName) {
+          resetActiveChatView()
+        }
+      }
+
+      async function onPromptPaste(event) {
+        const items = Array.from(event.clipboardData?.items || [])
+        const imageItems = items.filter(item => item.type.startsWith('image/'))
+
+        if (!imageItems.length) {
+          return
+        }
+
+        event.preventDefault()
+        const nextImages = []
+
+        for (const item of imageItems) {
+          const file = item.getAsFile()
+          if (!file) {
+            continue
+          }
+
+          nextImages.push(await fileToBase64(file))
+        }
+
+        setPromptImages(currentImages => [...currentImages, ...nextImages])
+      }
+
+      async function sendPrompt() {
+        const prompt = promptTextValue.trim()
+        if (!prompt && !promptImages.length) {
+          return
+        }
+
+        const imageSummary = await analyzePromptImages(prompt, promptImages)
+        const promptText = buildPromptText(prompt, imageSummary)
+        const userMessage = buildUserMessage(promptText, [])
+
+        if (!userMessage.content.length) {
+          return
+        }
+
+        const requestMessages = [
+          ...chatMessages,
+          userMessage,
+        ]
+
+        const modelResult = await callOpenRouterApi({
+          messages: requestMessages,
+          system: [
+            '所有對話必須使用台灣用語',
+            '關於我：',
+            aboutMe || '目前沒有關於我。',
+            '',
+            '我的筆記：',
+            myNotes || '目前沒有 myNotes。',
+          ].join('\n'),
+          chatName: activeChatName,
+          model: MODELS.chat,
+        })
+
+        if (modelResult.error) {
+          setPromptResult(modelResult.error)
+          return
+        }
+
+        const assistantMessage = buildAssistantTextMessage(modelResult.content || '')
+        const updatedMessages = [
+          ...requestMessages,
+          assistantMessage,
+        ]
+
+        await saveChatMessages(activeChatName, updatedMessages)
+        await saveChatRevision(activeChatName, (await loadChatRevision(activeChatName)) + 1)
+        setChatMessages(updatedMessages)
+        setPromptResult(modelResult.content || '')
+        setPromptTextValue('')
+        setPromptImages([])
+        setChatMetasState(await refreshChatMetaTime(activeChatName))
+      }
+
+      function setCredentials() {
+        localStorage.url = urlInput.trim()
+        localStorage.bearer = bearerInput.trim().replace(/\/$/, '')
+        const currentUrl = new URL(location.href)
+        currentUrl.search = ''
+        location.replace(currentUrl.toString())
+      }
+
+      if (!isReady) {
+        return html`<main class="container"><article>Loading...</article></main>`
+      }
+
+      if (requiresCredentials) {
+        return html`
+          <main class="container">
+            <input value=${urlInput} onInput=${event => setUrlInput(event.currentTarget.value)} type="text" placeholder="URL" />
+            <input value=${bearerInput} onInput=${event => setBearerInput(event.currentTarget.value)} type="text" placeholder="Bearer" />
+            <button onClick=${setCredentials}>Confirm</button>
+          </main>
+        `
+      }
+
+      const featureLabel = (() => {
+        switch (activeFeature) {
           case 'myNotes': return '前言'
           case 'aiNotes': return '總結'
           case 'chat': return '聊天'
@@ -698,97 +718,80 @@
         }
       })()
 
-      showMain(id === 'chat' ? 'prompt' : id)
+      const renderPromptImages = () => html`
+        <div>
+          ${promptImages.map((image, index) => html`
+            <article key=${`${image.media_type}-${index}`} style=${{ display: 'inline-block', marginRight: 'var(--pico-spacing)', marginBottom: 'var(--pico-spacing)' }}>
+              <img
+                src=${`data:${image.media_type};base64,${image.data}`}
+                alt=${`pasted-image-${index + 1}`}
+                style=${{ maxWidth: '160px', maxHeight: '160px', display: 'block', marginBottom: '0.5rem' }}
+              />
+            </article>
+          `)}
+        </div>
+      `
 
-      const headerButton = sel('header button')
-      headerButton.disabled = true
+      return html`
+        <div>
+          ${activeChatName && html`
+            <header style=${{ display: 'block' }}>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: 'calc(var(--pico-spacing) / 2)', marginBottom: 'var(--pico-spacing)' }}>
+                <div style=${{ margin: 0 }}>${activeChatName}</div>
+                <details class="dropdown" style=${{ margin: 0 }}>
+                  <summary role="button" class="outline">${featureLabel}</summary>
+                  <ul>
+                    <li><a href="#" onClick=${event => { event.preventDefault(); void activateFeature('myNotes') }}>前言</a></li>
+                    <li><a href="#" onClick=${event => { event.preventDefault(); void activateFeature('aiNotes') }}>總結</a></li>
+                    <li><a href="#" onClick=${event => { event.preventDefault(); void activateFeature('chat') }}>聊天</a></li>
+                  </ul>
+                </details>
+                <button onClick=${sendPrompt} disabled=${activeFeature !== 'chat'}>送出</button>
+                <button onClick=${back} class="outline">返回</button>
+              </div>
+            </header>
+          `}
 
-      if (id === 'myNotes') {
-        sel('#myNotes textarea').focus()
-        return
-      }
+          ${!activeChatName && html`
+            <main>
+              ${chatMetas.map(meta => html`
+                <button key=${meta.name} onClick=${() => void openChat(meta.name)}>${formatChatName(meta)}</button>
+              `)}
+              <button onClick=${add}>＋</button>
+              <button onClick=${remove}>－</button>
+            </main>
+          `}
 
-      if (persistMyNotes) {
-        persistCurrentMyNotes()
-      }
+          ${activeChatName && activeFeature === 'myNotes' && html`
+            <main>
+              <textarea ref=${myNotesTextareaRef} rows="12" value=${myNotes} onInput=${event => setMyNotes(event.currentTarget.value)} />
+            </main>
+          `}
 
-      if (id === 'aiNotes') {
-        ensureChatSummary(activeChatName())
-        return
-      }
+          ${activeChatName && activeFeature === 'aiNotes' && html`
+            <main>
+              <article style=${{ whiteSpace: 'pre-line' }}>${summaryText}</article>
+            </main>
+          `}
 
-      headerButton.disabled = false
-      sel('#prompt textarea').focus()
+          ${activeChatName && activeFeature === 'chat' && html`
+            <main>
+              <textarea
+                ref=${promptTextareaRef}
+                rows="4"
+                value=${promptTextValue}
+                onInput=${event => setPromptTextValue(event.currentTarget.value)}
+                onPaste=${onPromptPaste}
+              />
+              ${renderPromptImages()}
+              <article style=${{ whiteSpace: 'pre-line' }}>${promptResult}</article>
+            </main>
+          `}
+        </div>
+      `
     }
 
-    async function setCredentials() {
-      localStorage.url = urlInput.value.trim()
-      localStorage.bearer = bearerInput.value.trim().replace(/\/$/, '')
-      const currentUrl = new URL(location.href)
-      currentUrl.search = ''
-      location.replace(currentUrl.toString())
-    }
-
-    async function saveToKv(key, value) {
-      NProgress.start()
-      const response = await fetch(`${localStorage.url}/kv`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${localStorage.bearer}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ key, value }),
-      })
-      NProgress.done()
-      return await response.json()
-    }
-
-    async function loadFromKv(key) {
-      NProgress.start()
-      const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.bearer}`,
-        },
-      })
-      NProgress.done()
-
-      if (response.status === 404) {
-        await saveToKv(key, '')
-        return ''
-      }
-
-      return (await response.json()).value
-    }
-
-    async function deleteFromKv(key) {
-      NProgress.start()
-      const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
-        method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${localStorage.bearer}`,
-        },
-      })
-      NProgress.done()
-      return await response.json()
-    }
-
-    async function callOpenRouterApi({ messages, prompt, system, chatName, model, images }) {
-      NProgress.start()
-      const response = await fetch(`${localStorage.url}/openrouter`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${localStorage.bearer}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ messages, prompt, system, chat_name: chatName, model, images }),
-      })
-      NProgress.done()
-      return await response.json()
-    }
-
-    sel('#prompt textarea').addEventListener('paste', onPromptPaste)
-    renderPromptImages()
-    init()
+    render(html`<${App} />`, document.getElementById('app'))
   </script>
 </body>
 
