@@ -70,6 +70,7 @@
     const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生9種簡單的回應訊息， 你要關心/傾聽/幽默/地獄梗/不傷害對方:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n"
     const MODELS = {
       chat: 'minimax/minimax-m2.7',
+      imageAnalysis: 'qwen/qwen2.5-vl-72b-instruct',
       summary: 'minimax/minimax-m2.7',
     }
     const CHAT_FIELDS = {
@@ -405,6 +406,48 @@
       }
     }
 
+    function buildImageAnalysisPrompt(prompt) {
+      return [
+        '請使用繁體中文與台灣用語，將圖片內容整理成提供給另一個聊天模型的文字摘要。',
+        '如果圖片包含截圖、對話、文件或介面文字，優先完整擷取可見文字。',
+        '請嚴格依照以下格式輸出：',
+        '圖片重點：',
+        '可見文字：',
+        '情緒與語氣：',
+        '與回覆相關的上下文：',
+        '不確定之處：',
+        prompt ? `使用者補充：${prompt}` : '',
+      ].filter(Boolean).join('\n')
+    }
+
+    function buildPromptText(prompt, imageSummary) {
+      const sections = []
+
+      if (prompt) {
+        sections.push(prompt)
+      }
+
+      if (imageSummary) {
+        sections.push(['圖片描述：', imageSummary].join('\n'))
+      }
+
+      return sections.join('\n\n')
+    }
+
+    async function analyzePromptImages(prompt, images) {
+      if (!images.length) {
+        return ''
+      }
+
+      const analysisMessage = buildUserMessage(buildImageAnalysisPrompt(prompt), images)
+      const analysisResult = await callOpenRouterApi({
+        messages: [analysisMessage],
+        model: MODELS.imageAnalysis,
+      })
+
+      return analysisResult.content || ''
+    }
+
     function normalizeMessageBlock(block, role) {
       if (!block || typeof block !== 'object') {
         return null
@@ -424,17 +467,6 @@
         return {
           type: 'text',
           text,
-        }
-      }
-
-      if (role === 'user' && block.type === 'image' && block.source?.type === 'base64') {
-        return {
-          type: 'image',
-          source: {
-            type: 'base64',
-            media_type: block.source.media_type,
-            data: block.source.data,
-          },
         }
       }
 
@@ -602,14 +634,18 @@
 
       const name = activeChatName()
       const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
-      const persistedUserMessage = buildUserMessage(prompt, promptImages)
+      const imageSummary = await analyzePromptImages(prompt, promptImages)
+      const promptText = buildPromptText(prompt, imageSummary)
+      const requestUserMessage = buildUserMessage(promptText, [])
+      const persistedUserMessage = buildUserMessage(promptText, [])
+      const persistedUserMessages = persistedUserMessage.content.length ? [persistedUserMessage] : []
       const requestMessages = [
         ...state.chatMessages,
-        persistedUserMessage,
+        requestUserMessage,
       ]
       const nextMessages = [
         ...state.chatMessages,
-        persistedUserMessage,
+        ...persistedUserMessages,
       ]
 
       const modelResult = await callOpenRouterApi({
