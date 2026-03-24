@@ -18,22 +18,25 @@
       padding: 0 !important;
       display: none;
     }
-
-    fieldset label {
-      display: inline;
-      user-select: none;
-      margin-right: var(--pico-spacing);
-    }
   </style>
 </head>
 
 <body style="padding: var(--pico-spacing);">
   <header>
-    <div role="group">
-      <button onclick="sendPrompt()">↑<span id="activeName"></span></button>
-      <button name="featureRadio" id="myNotesRadio" onclick="onFeatureSel(event)">✏️</button>
-      <button name="featureRadio" id="aiNotesRadio" onclick="onFeatureSel(event)">🤖</button>
-      <button name="featureRadio" id="promptRadio" onclick="onFeatureSel(event)">💬</button>
+    <div class="grid">
+      <article id="activeName"></article>
+      <details class="dropdown">
+        <summary id="activatedFeature" role="button" class="outline"></summary>
+        <ul>
+          <li onclick="activateFeature('myNotes')"><a href="#">前言</a></li>
+          <li onclick="activateFeature('aiNotes')"><a href="#">總結</a></li>
+          <li onclick="activateFeature('chat')"><a href="#">聊天</a></li>
+          <li onclick="activateFeature('consult')"><a href="#">諮詢</a></li>
+        </ul>
+      </details>
+      <div>
+        <button onclick="sendPrompt()">↑</button>
+      </div>
     </div>
   </header>
 
@@ -469,7 +472,7 @@
       myNotesTextarea.value = myNotes
       renderLatestExchange(state.chatMessages)
 
-      activateFeature(myNotes === MY_NOTES_INIT ? 'myNotes' : 'prompt', false)
+      activateFeature(myNotes === MY_NOTES_INIT ? 'myNotes' : 'chat', false)
     }
 
     function createChatButton(meta) {
@@ -567,8 +570,18 @@
     }
 
     function activateFeature(id, persistMyNotes = true) {
+      sel('#activatedFeature').textContent = (() => {
+        switch (id) {
+          case 'myNotes': return '前言'
+          case 'aiNotes': return '總結'
+          case 'chat': return '聊天'
+          case 'consult': return '諮詢'
+          default: return ''
+        }
+      })()
+
       setSelectedFeature(id)
-      showMain(id)
+      showMain((id === 'chat' || id === 'consult') ? 'prompt' : id)
 
       const headerButton = sel('header button')
       headerButton.disabled = true
@@ -589,10 +602,6 @@
 
       headerButton.disabled = false
       sel('#prompt textarea').focus()
-    }
-
-    function onFeatureSel(event) {
-      activateFeature(event.target.id.replace('Radio', ''))
     }
 
     async function setCredentials() {
