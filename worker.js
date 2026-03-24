@@ -6,7 +6,7 @@ const DEFAULT_MAX_TOKENS = 8192;
 function withCors(response) {
   const headers = new Headers(response.headers);
   headers.set("Access-Control-Allow-Origin", "*");
-  headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
   headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   return new Response(response.body, {
@@ -211,7 +211,7 @@ export default {
         status: 204,
         headers: {
           "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
           "Access-Control-Allow-Headers": "Content-Type, Authorization",
         },
       });
@@ -256,6 +256,18 @@ export default {
 
       await env.AI_CONSULTER_KV.put(key, String(value));
       return withCors(Response.json({ ok: true, key, value: String(value) }));
+    }
+
+    if (request.method === "DELETE" && url.pathname.startsWith("/kv/")) {
+      if (!(await isAuthorized(request, env))) {
+        return withCors(
+          Response.json({ error: "Unauthorized" }, { status: 401 }),
+        );
+      }
+
+      const key = decodeURIComponent(url.pathname.replace("/kv/", ""));
+      await env.AI_CONSULTER_KV.delete(key);
+      return withCors(Response.json({ ok: true, key }));
     }
 
     if (request.method === "POST" && url.pathname === "/openrouter") {
@@ -346,6 +358,7 @@ export default {
         routes: {
           read: "GET /kv/:key",
           write: "POST /kv",
+          delete: "DELETE /kv/:key",
           openrouter: "POST /openrouter",
         },
       }),

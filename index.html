@@ -23,20 +23,18 @@
 
 <body style="padding: var(--pico-spacing);">
   <header>
-    <div class="grid">
-      <article id="activeName"></article>
-      <details class="dropdown">
+    <div style="display: flex; align-items: center; gap: calc(var(--pico-spacing)/2); margin-bottom: var(--pico-spacing);">
+      <div id="activeName" style="margin: 0;"></div>
+      <details class="dropdown" style="margin: 0;">
         <summary id="activatedFeature" role="button" class="outline"></summary>
         <ul>
           <li onclick="activateFeature('myNotes')"><a href="#">前言</a></li>
           <li onclick="activateFeature('aiNotes')"><a href="#">總結</a></li>
           <li onclick="activateFeature('chat')"><a href="#">聊天</a></li>
-          <li onclick="activateFeature('consult')"><a href="#">諮詢</a></li>
         </ul>
       </details>
-      <div>
-        <button onclick="sendPrompt()">↑</button>
-      </div>
+      <button onclick="sendPrompt()">送出</button>
+      <button onclick="back()" class="outline">返回</button>
     </div>
   </header>
 
@@ -51,6 +49,7 @@
       <button></button>
     </template>
     <button onclick="add()">＋</button>
+    <button onclick="remove()">－</button>
   </main>
 
   <main id="myNotes">
@@ -68,17 +67,11 @@
   </main>
 
   <script>
-    const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生三種簡單的回應訊息 關心對方 傾聽對方 別說會傷害對方的言詞:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n"
+    const MY_NOTES_INIT = "利用聊天技巧依照以下資料幫我產生9種簡單的回應訊息， 你要關心/傾聽/幽默/地獄梗/不傷害對方:\n[他是怎樣的人?][怎麼認識他的?][他以前喜歡什麼?]\n"
     const MODELS = {
       chat: 'minimax/minimax-m2.7',
       summary: 'minimax/minimax-m2.7',
     }
-    const CHAT_REPLY_PROMPT_SUFFIX = '生成3種回應，輸出回應本身的句子就好，不用解釋。例如：\n「過去有受傷過嗎？」\n「了解，我不會讓你煩心的。彼此都需要空間。」\n「你說得對，確實是我沒有先想到這件事。不管是什麼關係，進門前先告知本來就是基本。我會記住這個教訓。」'
-    const CHAT_REPLY_MODELS = [
-      'minimax/minimax-m2.7',
-      'minimax/minimax-m2-her',
-      'x-ai/grok-4.20-beta',
-    ]
     const CHAT_FIELDS = {
       myNotes: 'myNotes',
       messages: 'messages',
@@ -259,6 +252,87 @@
       location.reload()
     }
 
+    function findChatMetaByInput(chatMetas, input) {
+      if (!input) {
+        return null
+      }
+
+      const normalizedInput = input.trim()
+      if (!normalizedInput) {
+        return null
+      }
+
+      const encodedInput = encodeToVariableName(normalizedInput)
+      return chatMetas.find(meta => {
+        return meta.name === normalizedInput || meta.name === encodedInput
+      }) || null
+    }
+
+    function buildChatDeleteKeys(name) {
+      return [
+        chatKey(name, CHAT_FIELDS.myNotes),
+        chatKey(name, CHAT_FIELDS.messages),
+        chatKey(name, CHAT_FIELDS.messagesRevision),
+        chatKey(name, CHAT_FIELDS.summary),
+        chatKey(name, CHAT_FIELDS.summaryRevision),
+        chatModelKey(name, CHAT_FIELDS.summary, MODELS.summary),
+        chatModelKey(name, CHAT_FIELDS.summaryRevision, MODELS.summary),
+      ]
+    }
+
+    function removeChatButton(name) {
+      sel(`#chatNames button[data-chat-name="${CSS.escape(name)}"]`)?.remove()
+    }
+
+    function resetActiveChatView() {
+      state.activeFeature = ''
+      state.chatMessages = []
+      sel('#activeName').textContent = ''
+      sel('#activatedFeature').textContent = ''
+      sel('#myNotes textarea').value = ''
+      sel('#aiNotes article').textContent = ''
+      sel('#promptResult').textContent = ''
+      clearPromptInput()
+      setHeaderVisible(false)
+      showMain('chatNames')
+    }
+
+    function back() {
+      if (activeChatName()) {
+        persistCurrentMyNotes()
+      }
+
+      resetActiveChatView()
+    }
+
+    async function remove() {
+      const input = prompt()
+      if (!input) {
+        return
+      }
+
+      const chatMetas = await loadChatMetas()
+      const targetMeta = findChatMetaByInput(chatMetas, input)
+      if (!targetMeta) {
+        alert('找不到指定的聊天')
+        return
+      }
+
+      const targetName = targetMeta.name
+      const remainingChatMetas = chatMetas.filter(meta => meta.name !== targetName)
+
+      await Promise.all([
+        saveChatMetas(remainingChatMetas),
+        ...buildChatDeleteKeys(targetName).map(key => deleteFromKv(key)),
+      ])
+
+      removeChatButton(targetName)
+
+      if (activeChatName() === targetName) {
+        resetActiveChatView()
+      }
+    }
+
     async function loadChatMessages(name) {
       return normalizeMessages(parseJson(await loadFromKv(chatKey(name, CHAT_FIELDS.messages)), []))
     }
@@ -324,31 +398,11 @@
       }
     }
 
-    function buildAssistantMessage(modelResult) {
-      const rawContent = modelResult.raw?.choices?.[0]?.message?.content
-      const content = Array.isArray(rawContent)
-        ? rawContent.map(block => normalizeMessageBlock(block, 'assistant')).filter(Boolean)
-        : []
-
-      return {
-        role: 'assistant',
-        content: content.length ? content : [{ type: 'text', text: modelResult.content || '' }],
-      }
-    }
-
     function buildAssistantTextMessage(text) {
       return {
         role: 'assistant',
         content: [{ type: 'text', text: text || '' }],
       }
-    }
-
-    function buildPromptText(prompt, featureId) {
-      if (featureId !== 'chat') {
-        return prompt
-      }
-
-      return [prompt, CHAT_REPLY_PROMPT_SUFFIX].filter(Boolean)
     }
 
     function normalizeMessageBlock(block, role) {
@@ -548,38 +602,35 @@
 
       const name = activeChatName()
       const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
-      const activeFeature = state.activeFeature || 'chat'
-      const promptText = buildPromptText(prompt, activeFeature)
       const persistedUserMessage = buildUserMessage(prompt, promptImages)
-      const requestUserMessage = buildUserMessage(promptText, promptImages)
       const requestMessages = [
         ...state.chatMessages,
-        requestUserMessage,
+        persistedUserMessage,
       ]
       const nextMessages = [
         ...state.chatMessages,
         persistedUserMessage,
       ]
 
-      const requestModels = activeFeature === 'chat' ? CHAT_REPLY_MODELS : [MODELS.chat]
-      const modelResults = await Promise.all(requestModels.map(model => {
-        return callOpenRouterApi({
-          messages: requestMessages,
-          system: `About me:${state.aboutMe}\n\n${myNotes}`,
-          chatName: name,
-          model,
-        })
-      }))
+      const modelResult = await callOpenRouterApi({
+        messages: requestMessages,
+        system: [
+          '所有對話必須使用台灣用語',
+          '關於我：',
+          state.aboutMe || '目前沒有關於我。',
+          '',
+          '我的筆記：',
+          myNotes || '目前沒有 myNotes。',
+        ].join('\n'),
+        chatName: name,
+        model: MODELS.chat,
+      })
 
-      const mergedContent = modelResults
-        .map(result => result.content || '')
-        .join('\n\n')
+      const mergedContent = modelResult.content || ''
 
       const updatedMessages = [
         ...nextMessages,
-        activeFeature === 'chat'
-          ? buildAssistantTextMessage(mergedContent)
-          : buildAssistantMessage(modelResults[0]),
+        buildAssistantTextMessage(mergedContent),
       ]
 
       sel('#promptResult').textContent = mergedContent
@@ -607,12 +658,11 @@
           case 'myNotes': return '前言'
           case 'aiNotes': return '總結'
           case 'chat': return '聊天'
-          case 'consult': return '諮詢'
           default: return ''
         }
       })()
 
-      showMain((id === 'chat' || id === 'consult') ? 'prompt' : id)
+      showMain(id === 'chat' ? 'prompt' : id)
 
       const headerButton = sel('header button')
       headerButton.disabled = true
@@ -672,6 +722,18 @@
       }
 
       return (await response.json()).value
+    }
+
+    async function deleteFromKv(key) {
+      NProgress.start()
+      const response = await fetch(`${localStorage.url}/kv/${encodeURIComponent(key)}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${localStorage.bearer}`,
+        },
+      })
+      NProgress.done()
+      return await response.json()
     }
 
     async function callOpenRouterApi({ messages, prompt, system, chatName, model, images }) {
