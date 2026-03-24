@@ -73,6 +73,12 @@
       chat: 'minimax/minimax-m2.7',
       summary: 'minimax/minimax-m2.7',
     }
+    const CHAT_REPLY_PROMPT_SUFFIX = '生成3種回應，輸出回應本身的句子就好，不用解釋。例如：\n「過去有受傷過嗎？」\n「了解，我不會讓你煩心的。彼此都需要空間。」\n「你說得對，確實是我沒有先想到這件事。不管是什麼關係，進門前先告知本來就是基本。我會記住這個教訓。」'
+    const CHAT_REPLY_MODELS = [
+      'minimax/minimax-m2.7',
+      'minimax/minimax-m2-her',
+      'x-ai/grok-4.20-beta',
+    ]
     const CHAT_FIELDS = {
       myNotes: 'myNotes',
       messages: 'messages',
@@ -83,6 +89,7 @@
     let promptImages = []
     const state = {
       aboutMe: '',
+      activeFeature: '',
       chatMessages: [],
     }
 
@@ -329,6 +336,21 @@
       }
     }
 
+    function buildAssistantTextMessage(text) {
+      return {
+        role: 'assistant',
+        content: [{ type: 'text', text: text || '' }],
+      }
+    }
+
+    function buildPromptText(prompt, featureId) {
+      if (featureId !== 'chat') {
+        return prompt
+      }
+
+      return [prompt, CHAT_REPLY_PROMPT_SUFFIX].filter(Boolean)
+    }
+
     function normalizeMessageBlock(block, role) {
       if (!block || typeof block !== 'object') {
         return null
@@ -526,24 +548,41 @@
 
       const name = activeChatName()
       const myNotes = await loadFromKv(chatKey(name, CHAT_FIELDS.myNotes))
+      const activeFeature = state.activeFeature || 'chat'
+      const promptText = buildPromptText(prompt, activeFeature)
+      const persistedUserMessage = buildUserMessage(prompt, promptImages)
+      const requestUserMessage = buildUserMessage(promptText, promptImages)
+      const requestMessages = [
+        ...state.chatMessages,
+        requestUserMessage,
+      ]
       const nextMessages = [
         ...state.chatMessages,
-        buildUserMessage(prompt, promptImages),
+        persistedUserMessage,
       ]
 
-      const modelResult = await callOpenRouterApi({
-        messages: nextMessages,
-        system: `About me:${state.aboutMe}\n\n${myNotes}`,
-        chatName: name,
-        model: MODELS.chat,
-      })
+      const requestModels = activeFeature === 'chat' ? CHAT_REPLY_MODELS : [MODELS.chat]
+      const modelResults = await Promise.all(requestModels.map(model => {
+        return callOpenRouterApi({
+          messages: requestMessages,
+          system: `About me:${state.aboutMe}\n\n${myNotes}`,
+          chatName: name,
+          model,
+        })
+      }))
+
+      const mergedContent = modelResults
+        .map(result => result.content || '')
+        .join('\n\n')
 
       const updatedMessages = [
         ...nextMessages,
-        buildAssistantMessage(modelResult),
+        activeFeature === 'chat'
+          ? buildAssistantTextMessage(mergedContent)
+          : buildAssistantMessage(modelResults[0]),
       ]
 
-      sel('#promptResult').textContent = modelResult.content
+      sel('#promptResult').textContent = mergedContent
       await saveChatMessages(name, updatedMessages)
       state.chatMessages = updatedMessages
       await saveChatRevision(name, (await loadChatRevision(name)) + 1)
@@ -561,15 +600,8 @@
       saveToKv(chatKey(name, CHAT_FIELDS.myNotes), sel('#myNotes textarea').value)
     }
 
-    function setSelectedFeature(id) {
-      selAll('[name=featureRadio]').forEach(btn => btn.classList.add('outline'))
-      const button = sel(`#${id}Radio`)
-      if (button) {
-        button.classList.remove('outline')
-      }
-    }
-
     function activateFeature(id, persistMyNotes = true) {
+      state.activeFeature = id
       sel('#activatedFeature').textContent = (() => {
         switch (id) {
           case 'myNotes': return '前言'
@@ -580,7 +612,6 @@
         }
       })()
 
-      setSelectedFeature(id)
       showMain((id === 'chat' || id === 'consult') ? 'prompt' : id)
 
       const headerButton = sel('header button')
