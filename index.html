@@ -857,8 +857,8 @@
               ${chatMetas.map(meta => html`
                 <button key=${meta.name} onClick=${() => void openChat(meta.name)}>${formatChatName(meta)}</button>
               `)}
-              <button class="outline" onClick=${add}>＋</button>
-              <button class="outline" onClick=${remove}>－</button>
+              <button class="outline secondary" onClick=${add}>＋</button>
+              <button class="outline secondary" onClick=${remove}>－</button>
             </main>
           `}
 
