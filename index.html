@@ -80,11 +80,38 @@
       chatDate.setHours(0, 0, 0, 0)
 
       const dayDiff = Math.round((today.getTime() - chatDate.getTime()) / 86400000)
-      return dayDiff > 4 ? `${meta.name}-${dayDiff}` : meta.name
+      return dayDiff > 3 ? `${meta.name}(${dayDiff})` : meta.name
     }
 
     function sortChatMetas(chatMetas) {
       return [...chatMetas].sort((a, b) => a.time - b.time)
+    }
+
+    function formatDateInputValue(timestamp) {
+      const date = new Date(Number(timestamp))
+      if (!Number.isFinite(date.getTime())) {
+        return ''
+      }
+
+      const year = date.getFullYear()
+      const month = String(date.getMonth() + 1).padStart(2, '0')
+      const day = String(date.getDate()).padStart(2, '0')
+      return `${year}-${month}-${day}`
+    }
+
+    function mergeDateInputWithTimestamp(value, currentTimestamp) {
+      if (!value) {
+        return Number(currentTimestamp)
+      }
+
+      const [year, month, day] = value.split('-').map(Number)
+      if (![year, month, day].every(Number.isFinite)) {
+        return Number(currentTimestamp)
+      }
+
+      const baseDate = new Date(Number(currentTimestamp) || Date.now())
+      baseDate.setFullYear(year, month - 1, day)
+      return baseDate.getTime()
     }
 
     function buildUserMessage(prompt, images) {
@@ -420,6 +447,7 @@
     function App() {
       const [isReady, setIsReady] = useState(false)
       const [requiresCredentials, setRequiresCredentials] = useState(false)
+      const [isDateDialogOpen, setIsDateDialogOpen] = useState(false)
       const [urlInput, setUrlInput] = useState(localStorage.url || '')
       const [bearerInput, setBearerInput] = useState(localStorage.bearer || '')
       const [aboutMe, setAboutMe] = useState('')
@@ -611,6 +639,58 @@
         }
       }
 
+      async function updateActiveChatTime(value) {
+        if (!activeChatName) {
+          return
+        }
+
+        const currentMeta = chatMetas.find(meta => meta.name === activeChatName)
+        if (!currentMeta) {
+          return
+        }
+
+        const nextTime = mergeDateInputWithTimestamp(value, currentMeta.time)
+        const nextChatMetas = sortChatMetas(chatMetas.map(meta => {
+          if (meta.name !== activeChatName) {
+            return meta
+          }
+
+          return {
+            ...meta,
+            time: nextTime,
+          }
+        }))
+
+        await saveChatMetas(nextChatMetas)
+        setChatMetasState(nextChatMetas)
+        setIsDateDialogOpen(false)
+      }
+
+      function showDateDialog() {
+        if (!activeChatName) {
+          return
+        }
+
+        setIsDateDialogOpen(true)
+      }
+
+      function hideDateDialog() {
+        setIsDateDialogOpen(false)
+      }
+
+      function closeDropdown(event) {
+        event.preventDefault()
+        const details = event.currentTarget.closest('details')
+        if (details) {
+          details.open = false
+        }
+      }
+
+      function onFeatureMenuClick(event, action) {
+        closeDropdown(event)
+        void action()
+      }
+
       async function onPromptPaste(event) {
         const items = Array.from(event.clipboardData?.items || [])
         const imageItems = items.filter(item => item.type.startsWith('image/'))
@@ -711,12 +791,14 @@
 
       const featureLabel = (() => {
         switch (activeFeature) {
-          case 'myNotes': return '前言'
-          case 'aiNotes': return '總結'
-          case 'chat': return '聊天'
+          case 'myNotes': return '📝前言'
+          case 'aiNotes': return '📌總結'
+          case 'chat': return '💬聊天'
           default: return ''
         }
       })()
+      const activeChatMeta = chatMetas.find(meta => meta.name === activeChatName)
+      const activeChatDateValue = formatDateInputValue(activeChatMeta?.time)
 
       const renderPromptImages = () => html`
         <div>
@@ -732,22 +814,40 @@
         </div>
       `
 
+      const renderDateDialog = () => html`
+        <dialog open onClose=${hideDateDialog}>
+          <article>
+            <header style=${{ padding: 'var(--pico-spacing) !important' }}>
+              <button aria-label="Close" rel="prev" onClick=${hideDateDialog}></button>
+            </header>
+            <input
+              type="date"
+              aria-label="Date"
+              value=${activeChatDateValue}
+              onChange=${event => void updateActiveChatTime(event.currentTarget.value)}
+            />
+          </article>
+        </dialog>
+      `
+
       return html`
         <div>
-          ${activeChatName && html`
+          ${isDateDialogOpen && renderDateDialog()}
+        ${activeChatName && html`
             <header style=${{ display: 'block' }}>
               <div style=${{ display: 'flex', alignItems: 'center', gap: 'calc(var(--pico-spacing) / 2)', marginBottom: 'var(--pico-spacing)' }}>
                 <div style=${{ margin: 0 }}>${activeChatName}</div>
                 <details class="dropdown" style=${{ margin: 0 }}>
                   <summary role="button" class="outline">${featureLabel}</summary>
                   <ul>
-                    <li><a href="#" onClick=${event => { event.preventDefault(); void activateFeature('myNotes') }}>前言</a></li>
-                    <li><a href="#" onClick=${event => { event.preventDefault(); void activateFeature('aiNotes') }}>總結</a></li>
-                    <li><a href="#" onClick=${event => { event.preventDefault(); void activateFeature('chat') }}>聊天</a></li>
+                    <li><a href="#" onClick=${event => onFeatureMenuClick(event, () => activateFeature('myNotes'))}>📝前言</a></li>
+                    <li><a href="#" onClick=${event => onFeatureMenuClick(event, () => activateFeature('aiNotes'))}>📌總結</a></li>
+                    <li><a href="#" onClick=${event => onFeatureMenuClick(event, () => activateFeature('chat'))}>💬聊天</a></li>
+                    <li><a href="#" onClick=${event => onFeatureMenuClick(event, async () => showDateDialog())}>📅日期</a></li>
+                    <li><a href="#" onClick=${event => onFeatureMenuClick(event, () => back())}>↩️返回</a></li>
                   </ul>
                 </details>
                 <button onClick=${sendPrompt} disabled=${activeFeature !== 'chat'}>送出</button>
-                <button onClick=${back} class="outline">返回</button>
               </div>
             </header>
           `}
@@ -757,8 +857,8 @@
               ${chatMetas.map(meta => html`
                 <button key=${meta.name} onClick=${() => void openChat(meta.name)}>${formatChatName(meta)}</button>
               `)}
-              <button onClick=${add}>＋</button>
-              <button onClick=${remove}>－</button>
+              <button class="outline" onClick=${add}>＋</button>
+              <button class="outline" onClick=${remove}>－</button>
             </main>
           `}
 
